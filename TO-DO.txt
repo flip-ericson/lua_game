@@ -1,4 +1,3 @@
-zLayer changing
 ladders
 visual feedback for hitting tiles
     - now has to apply to walls
@@ -19,7 +18,6 @@ debug time system
     -⚠️ 4. Day / month rollover is correct but fragile and prone to dt spikes and time skips
     -⚠️ 5. You're recalculating secondsPerGameMinute every frame
 water physics
-damage can untill land
 dash function
 watering can
 no black backround do cloud maybe?
