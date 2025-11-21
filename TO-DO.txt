@@ -1,0 +1,45 @@
+zLayer changing
+ladders
+visual feedback for hitting tiles
+    - now has to apply to walls
+tiles drop resources
+    dirt
+    both farmlands
+add crafting
+add farming
+longer days in summer/shorter in winter
+move time gui down a few pixels
+sound effects
+    -walking
+    -swimming
+    -mining
+    -digging
+debug time system
+    -⚠️ 3. Your moon advancement logic can double-trigger or never trigger
+    -⚠️ 4. Day / month rollover is correct but fragile and prone to dt spikes and time skips
+    -⚠️ 5. You're recalculating secondsPerGameMinute every frame
+water physics
+damage can untill land
+dash function
+watering can
+no black backround do cloud maybe?
+encumberance system (exponential?)
+make jump feel smoother
+dont change draw of layers until after jump ends
+ai pathing
+health declaration in tiles is uneccessary
+maybe add transparency to tiles player is obscured by
+add items to draw order
+trees
+craftables - [pickaxe
+            shovel
+            hoe]
+skill upgrades? perks?
+bartering system
+animals - [cow
+        pig
+        sheep]
+enemies - [orc
+        skeleton
+        kobold]
+lighting

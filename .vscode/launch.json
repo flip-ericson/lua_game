@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lua-local",
+      "request": "launch",
+      "name": "LÖVE",
+      "program": {
+        "command": "C:/Program Files (x86)/LOVE/lovec.exe"
+      },
+      "args": [
+        "Dwarf_Hermit_Lua" // <-- Pass the subfolder name
+      ]
+    }
+  ]
+}
