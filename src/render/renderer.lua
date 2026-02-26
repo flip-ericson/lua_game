@@ -38,6 +38,15 @@ local sqrt3 = math.sqrt(3)
 
 local Renderer = {}
 
+-- ── Debug flags ───────────────────────────────────────────────────────────
+local DBG_HIDE_LEAVES = false   -- true = skip leaf tiles in vegetation pass
+
+-- ── Overview mode (M key) ─────────────────────────────────────────────────
+local overview_mode = false
+
+function Renderer.toggle_overview() overview_mode = not overview_mode end
+function Renderer.get_overview()    return overview_mode              end
+
 -- ── Mode ──────────────────────────────────────────────────────────────────
 
 local render_mode       = "overworld"   -- "overworld" | "underground"
@@ -193,8 +202,8 @@ local function draw_overworld(world, cam)
     local pad    = Hex.SIZE * 3
 
     local sea = WorldgenCfg.sea_level
-    local sf  = WorldgenCfg.island.surface_floor
-    local sp  = WorldgenCfg.island.surface_peak
+    local sf  = WorldgenCfg.island.edge_height
+    local sp  = WorldgenCfg.island.center_height + WorldgenCfg.island.noise_amplitude * 0.5
 
     -- Tile colors (looked up once per frame).
     local grass_id = TileRegistry.id("grass")
@@ -218,105 +227,184 @@ local function draw_overworld(world, cam)
     local r_lo = math.min(ra, rb, rc, rd) - 1
     local r_hi = math.max(ra, rb, rc, rd) + 1
 
+    -- Overview: blue world-boundary hexagon drawn before cam:apply().
+    -- With flat-top tiles the hex-of-hexes grid is POINTY-TOP in screen space:
+    -- pointed N/S (at axial (0,±R)), flat vertical sides E/W (at axial (±R,0)).
+    -- Corner order traces the actual world boundary exactly.
+    if overview_mode then
+        local R = WorldgenCfg.world_radius
+        local boundary = {
+            { R,  0}, { R, -R}, { 0, -R},
+            {-R,  0}, {-R,  R}, { 0,  R},
+        }
+        local verts = {}
+        for _, c in ipairs(boundary) do
+            local wx, wy = Hex.hex_to_pixel(c[1], c[2])
+            local sx, sy = cam:world_to_screen(wx, wy - sea * LAYER_HEIGHT)
+            verts[#verts + 1] = sx
+            verts[#verts + 1] = sy
+        end
+        love.graphics.setColor(water_tc[1], water_tc[2], water_tc[3])
+        love.graphics.polygon("fill", verts)
+    end
+
+    -- Overview step: only visit every Nth hex so total work ≈ 300² = 90K calls.
+    -- At overview zoom each hex is sub-pixel anyway; skipping changes nothing visually.
+    local step = overview_mode
+        and math.max(1, math.ceil((q_hi - q_lo) / 300))
+        or  1
+
     cam:apply()
 
-    for r = r_lo, r_hi do
-        for q = q_lo, q_hi do
+    local world_r = WorldgenCfg.world_radius
+    for r = r_lo, r_hi, step do
+        for q = q_lo, q_hi, step do
+            -- Clip to hexagonal world boundary; skip anything outside.
+            if math.max(math.abs(q), math.abs(r), math.abs(q + r)) > world_r then
+                goto continue
+            end
             local sl        = Worldgen.surface_layer(q, r)
             local above_sea = sl >= sea
             local dl        = above_sea and sl or sea   -- visual draw level
 
             local px, py = Hex.hex_to_pixel(q, r)
             local cy     = py - dl * LAYER_HEIGHT
-            local v      = hex_verts(px, cy)
 
-            -- Cliff faces: land tiles only; water is a flat plane.
-            -- Each layer is drawn individually using world:get_tile so that
-            -- mined-out gaps and player-placed blocks always show correctly.
-            -- Air layers (tile_id == 0) are simply skipped — they show as holes.
-            if above_sea then
-                -- E face  (v0→v1), neighbour dq=+1, dr=0
-                local sl_e = Worldgen.surface_layer(q + 1, r)
-                local dl_e = sl_e >= sea and sl_e or sea
-                if dl > dl_e then
-                    for l = dl_e, dl - 1 do
-                        local tid = world:get_tile(q, r, l)
-                        if tid ~= 0 then
-                            local sc = TileRegistry.COLOR_SIDE[tid]
-                            love.graphics.setColor(sc[1], sc[2], sc[3])
-                            local yt = (dl - 1 - l) * LAYER_HEIGHT
-                            local yb = (dl - l) * LAYER_HEIGHT
-                            love.graphics.polygon("fill",
-                                v[1], v[2]+yt, v[3], v[4]+yt,
-                                v[3], v[4]+yb, v[1], v[2]+yb)
-                        end
+            if overview_mode then
+                -- Ocean already covered by the blue plane — skip non-land hexes.
+                -- Draw a filled cell rectangle; no cliff faces, no chunk loads.
+                if above_sea then
+                    local top_id = world:get_tile(q, r, dl)
+                    for k = 1, 12 do
+                        local id = world:get_tile(q, r, dl + k)
+                        if id == 0 then break end
+                        top_id = id
                     end
+                    local tc = (top_id ~= 0) and TileRegistry.COLOR[top_id] or grass_tc
+                    love.graphics.setColor(tc[1], tc[2], tc[3])
+                    local cw = step * Hex.SIZE * 1.5
+                    local ch = step * Hex.SIZE * sqrt3
+                    love.graphics.rectangle("fill", px - cw * 0.5, cy - ch * 0.5, cw, ch)
                 end
-
-                -- SE face (v1→v2), neighbour dq=0, dr=+1
-                local sl_se = Worldgen.surface_layer(q, r + 1)
-                local dl_se = sl_se >= sea and sl_se or sea
-                if dl > dl_se then
-                    for l = dl_se, dl - 1 do
-                        local tid = world:get_tile(q, r, l)
-                        if tid ~= 0 then
-                            local sc = TileRegistry.COLOR_SIDE[tid]
-                            love.graphics.setColor(sc[1], sc[2], sc[3])
-                            local yt = (dl - 1 - l) * LAYER_HEIGHT
-                            local yb = (dl - l) * LAYER_HEIGHT
-                            love.graphics.polygon("fill",
-                                v[3], v[4]+yt, v[5], v[6]+yt,
-                                v[5], v[6]+yb, v[3], v[4]+yb)
-                        end
-                    end
-                end
-
-                -- SW face (v2→v3), neighbour dq=-1, dr=+1
-                local sl_sw = Worldgen.surface_layer(q - 1, r + 1)
-                local dl_sw = sl_sw >= sea and sl_sw or sea
-                if dl > dl_sw then
-                    for l = dl_sw, dl - 1 do
-                        local tid = world:get_tile(q, r, l)
-                        if tid ~= 0 then
-                            local sc = TileRegistry.COLOR_SIDE[tid]
-                            love.graphics.setColor(sc[1], sc[2], sc[3])
-                            local yt = (dl - 1 - l) * LAYER_HEIGHT
-                            local yb = (dl - l) * LAYER_HEIGHT
-                            love.graphics.polygon("fill",
-                                v[5], v[6]+yt, v[7], v[8]+yt,
-                                v[7], v[8]+yb, v[5], v[6]+yb)
-                        end
-                    end
-                end
-            end
-
-            -- Top face.
-            if above_sea then
-                love.graphics.setColor(grass_tc[1], grass_tc[2], grass_tc[3])
             else
-                love.graphics.setColor(water_tc[1], water_tc[2], water_tc[3])
+                local v = hex_verts(px, cy)
+
+                -- Cliff faces: land tiles only; water is a flat plane.
+                -- Each layer is drawn individually using world:get_tile so that
+                -- mined-out gaps and player-placed blocks always show correctly.
+                -- Air layers (tile_id == 0) are simply skipped — they show as holes.
+                if above_sea then
+                    -- E face  (v0→v1), neighbour dq=+1, dr=0
+                    local sl_e = Worldgen.surface_layer(q + 1, r)
+                    local dl_e = sl_e >= sea and sl_e or sea
+                    if dl > dl_e then
+                        for l = dl_e, dl - 1 do
+                            local tid = world:get_tile(q, r, l)
+                            if tid ~= 0 then
+                                local sc = TileRegistry.COLOR_SIDE[tid]
+                                love.graphics.setColor(sc[1], sc[2], sc[3])
+                                local yt = (dl - 1 - l) * LAYER_HEIGHT
+                                local yb = (dl - l) * LAYER_HEIGHT
+                                love.graphics.polygon("fill",
+                                    v[1], v[2]+yt, v[3], v[4]+yt,
+                                    v[3], v[4]+yb, v[1], v[2]+yb)
+                            end
+                        end
+                    end
+
+                    -- SE face (v1→v2), neighbour dq=0, dr=+1
+                    local sl_se = Worldgen.surface_layer(q, r + 1)
+                    local dl_se = sl_se >= sea and sl_se or sea
+                    if dl > dl_se then
+                        for l = dl_se, dl - 1 do
+                            local tid = world:get_tile(q, r, l)
+                            if tid ~= 0 then
+                                local sc = TileRegistry.COLOR_SIDE[tid]
+                                love.graphics.setColor(sc[1], sc[2], sc[3])
+                                local yt = (dl - 1 - l) * LAYER_HEIGHT
+                                local yb = (dl - l) * LAYER_HEIGHT
+                                love.graphics.polygon("fill",
+                                    v[3], v[4]+yt, v[5], v[6]+yt,
+                                    v[5], v[6]+yb, v[3], v[4]+yb)
+                            end
+                        end
+                    end
+
+                    -- SW face (v2→v3), neighbour dq=-1, dr=+1
+                    local sl_sw = Worldgen.surface_layer(q - 1, r + 1)
+                    local dl_sw = sl_sw >= sea and sl_sw or sea
+                    if dl > dl_sw then
+                        for l = dl_sw, dl - 1 do
+                            local tid = world:get_tile(q, r, l)
+                            if tid ~= 0 then
+                                local sc = TileRegistry.COLOR_SIDE[tid]
+                                love.graphics.setColor(sc[1], sc[2], sc[3])
+                                local yt = (dl - 1 - l) * LAYER_HEIGHT
+                                local yb = (dl - l) * LAYER_HEIGHT
+                                love.graphics.polygon("fill",
+                                    v[5], v[6]+yt, v[7], v[8]+yt,
+                                    v[7], v[8]+yb, v[5], v[6]+yb)
+                            end
+                        end
+                    end
+                end
+
+                -- Top face: whatever tile sits at dl (grass, sand, salt_water, etc.).
+                local sid = world:get_tile(q, r, dl)
+                if sid and sid ~= 0 then
+                    local tc = TileRegistry.COLOR[sid]
+                    love.graphics.setColor(tc[1], tc[2], tc[3])
+                    love.graphics.polygon("fill", v)
+                end
+
+                -- Vegetation pass: organic tiles stacked above dl, rendered as 3D tiles.
+                -- Inline in the same r,q loop so painter's algorithm stays correct.
+                -- No culling — organic tiles will have transparent sprite regions later.
+                for k = 1, 12 do
+                    local vl  = dl + k
+                    local tid = world:get_tile(q, r, vl)
+                    local def = tid and tid ~= 0 and TileRegistry.get(tid)
+                    if def and def.category == "organic"
+                        and not (DBG_HIDE_LEAVES and def.name:find("leaves")) then
+                        local vv = hex_verts(px, py - vl * LAYER_HEIGHT)
+                        -- Side faces: draw where the neighbour at the same layer is air.
+                        local sc = TileRegistry.COLOR_SIDE[tid]
+                        love.graphics.setColor(sc[1], sc[2], sc[3])
+                        if world:get_tile(q+1, r,   vl) == 0 then draw_side(vv[1], vv[2], vv[3], vv[4]) end
+                        if world:get_tile(q,   r+1, vl) == 0 then draw_side(vv[3], vv[4], vv[5], vv[6]) end
+                        if world:get_tile(q-1, r+1, vl) == 0 then draw_side(vv[5], vv[6], vv[7], vv[8]) end
+                        -- Top face: only for the topmost tile in this column (nothing above).
+                        if world:get_tile(q, r, vl + 1) == 0 then
+                            local tc = TileRegistry.COLOR[tid]
+                            love.graphics.setColor(tc[1], tc[2], tc[3])
+                            love.graphics.polygon("fill", vv)
+                        end
+                    end
+                end
             end
-            love.graphics.polygon("fill", v)
+            ::continue::
         end
     end
 
-    -- Hover hex: iterate 3 times to converge on the right surface height.
-    local mx, my    = love.mouse.getPosition()
-    local wx, wy    = cam:screen_to_world(mx, my)
-    local hover_dl  = sea
-    local hq, hr
-    for _ = 1, 3 do
-        hq, hr    = Hex.pixel_to_hex(wx, wy + hover_dl * LAYER_HEIGHT)
-        local hsl = Worldgen.surface_layer(hq, hr)
-        hover_dl  = hsl >= sea and hsl or sea
-    end
-    local hpx, hpy = Hex.hex_to_pixel(hq, hr)
-    local hv       = hex_verts(hpx, hpy - hover_dl * LAYER_HEIGHT)
+    -- Hover hex: suppressed in overview (single-hex highlight is meaningless at world scale).
+    if not overview_mode then
+        local mx, my    = love.mouse.getPosition()
+        local wx, wy    = cam:screen_to_world(mx, my)
+        local hover_dl  = sea
+        local hq, hr
+        for _ = 1, 3 do
+            hq, hr    = Hex.pixel_to_hex(wx, wy + hover_dl * LAYER_HEIGHT)
+            local hsl = Worldgen.surface_layer(hq, hr)
+            hover_dl  = hsl >= sea and hsl or sea
+        end
+        local hpx, hpy = Hex.hex_to_pixel(hq, hr)
+        local hv       = hex_verts(hpx, hpy - hover_dl * LAYER_HEIGHT)
 
-    love.graphics.setColor(1, 1, 1, 0.55)
-    love.graphics.setLineWidth(2)
-    love.graphics.polygon("line", hv)
-    love.graphics.setLineWidth(1)
+        love.graphics.setColor(1, 1, 1, 0.55)
+        love.graphics.setLineWidth(2)
+        love.graphics.polygon("line", hv)
+        love.graphics.setLineWidth(1)
+    end
 
     cam:reset()
     love.graphics.setColor(1, 1, 1)

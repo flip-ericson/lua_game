@@ -1,22 +1,109 @@
 -- config/worldgen.lua
 -- All world generation constants. Tweak here, never in code.
+--
+-- ── World size selector ───────────────────────────────────────────────────
+-- Change PRESET to switch between world sizes. One line, that's it.
+--   "debug"  — radius  64, depth  48 (sea@24).  Fast gen, gentle hill, gameplay testing.
+--   "small"  — radius 500, depth 1024 (sea@768). Short generation, quick playtests.
+--   "medium" — radius 2000, depth 1024 (sea@768). Moderate scale.
+--   "large"  — radius 5000, depth 1024 (sea@768). Full vision, full BFS cost.
+--
+local PRESET = "debug"
+
+-- Per-preset: world_radius, optional world_depth + sea_level override, island shape.
+-- Subsurface / ore / cave / biome params are shared (see below).
+-- world_depth and sea_level default to 1024 / 768 when not set in a preset.
+--
+-- Island shape formula:
+--   falloff = exp( -(dist/sigma)^falloff_n )
+--   base    = edge_height + (center_height - edge_height) * falloff
+--   surface = base + (noise - 0.5) * noise_amplitude * falloff
+--
+--   falloff_n:       1 = tent/mountain (pointy peak, gentle coast)
+--                    2 = Gaussian dome
+--                    3 = plateau + steep coastal cliffs
+--   sigma:           characteristic width; pre-calculated per preset for ~85% land coverage
+--                    formula: sigma = (0.922 × world_radius) / (-ln(R))^(1/n)
+--                    where R = (sea_level - edge_height) / (center_height - edge_height)
+--   edge_height:     surface layer at world boundary; must be < sea_level
+--   center_height:   surface layer at island centre; must be > sea_level
+--   noise_amplitude: ±(amplitude/2) variation scaled by falloff; higher = more peaks & valleys
+--   Noise scale inversely proportional to world_radius → similar coastal detail across presets
+local PRESETS = {
+    -- ── Debug — tiny island, fast gen, gameplay testing ──────────────────
+    -- world_depth=48 (6 vertical chunks).  Sea level at layer 24.
+    -- Peak is 4 layers above sea → a gentle hill, not a cliff.
+    -- Dirt/stone subsurface still present; ores/grimstone/lava won't appear
+    -- at these shallow depths — spawn them manually when testing each system.
+    debug = {
+        world_radius = 64,
+        world_depth  = 48,   -- 6 vertical chunks; headroom for trees above sea
+        sea_level    = 24,   -- surface sits at layer 24 (3 chunks up from bedrock)
+        island = {
+            sigma           = 93,
+            falloff_n       = 1.5,
+            edge_height     = 18,   -- 6 layers below sea_level → shallow ocean rim
+            center_height   = 27,   -- 3 layers above sea_level → gentle hill peak
+            noise_amplitude = 2,    -- ±1 layer of variation → mostly flat land
+            noise_scale     = 0.050,
+            noise_octaves   = 2,
+            beach_radius    = 2,
+        },
+    },
+    small = {
+        world_radius = 500,
+        island = {
+            sigma           = 710,
+            falloff_n       = 1.5,    -- USER TUNABLE: shape
+            edge_height     = 450,    -- USER TUNABLE: ocean depth at world edge
+            center_height   = 950,    -- USER TUNABLE: island interior height
+            noise_amplitude = 100,    -- USER TUNABLE: terrain drama
+            noise_scale     = 0.006,  -- 2× larger than large
+            noise_octaves   = 4,
+            beach_radius    = 3,
+        },
+    },
+    medium = {
+        world_radius = 2000,
+        island = {
+            sigma           = 2840,
+            falloff_n       = 1.5,    -- USER TUNABLE: shape
+            edge_height     = 450,    -- USER TUNABLE: ocean depth at world edge
+            center_height   = 950,    -- USER TUNABLE: island interior height
+            noise_amplitude = 100,    -- USER TUNABLE: terrain drama
+            noise_scale     = 0.003,
+            noise_octaves   = 4,
+            beach_radius    = 3,
+        },
+    },
+    large = {
+        world_radius = 5000,
+        island = {
+            sigma           = 7000,
+            falloff_n       = 1.5,    -- USER TUNABLE: shape
+            edge_height     = 450,    -- USER TUNABLE: ocean depth at world edge
+            center_height   = 950,    -- USER TUNABLE: island interior height
+            noise_amplitude = 100,    -- USER TUNABLE: terrain drama
+            noise_scale     = 0.003,
+            noise_octaves   = 4,
+            beach_radius    = 3,
+        },
+    },
+}
+
+local preset = PRESETS[PRESET]
+assert(preset, "Unknown PRESET '" .. tostring(PRESET) .. "' — use debug/small/medium/large")
+
+-- ── Shared constants (same regardless of world size) ──────────────────────
 
 return {
     seed         = 12345,
-    world_radius = 5000,
-    world_depth  = 1024,
+    world_radius = preset.world_radius,
+    world_depth  = preset.world_depth or 1024,
 
-    sea_level = 768,
+    sea_level = preset.sea_level or 768,
 
-    island = {
-        falloff_radius    = 3200,
-        falloff_sharpness = 3.0,
-        noise_scale       = 0.003,
-        noise_octaves     = 4,
-        surface_floor     = 720,
-        surface_peak      = 820,
-        beach_radius      = 3,
-    },
+    island = preset.island,
 
     -- Dirt ceiling: how many layers directly below the surface tile are dirt.
     -- Depth varies per-column via single-octave noise in [depth_min, depth_max].
@@ -74,6 +161,19 @@ return {
                    height_min = 5, height_max = 10, canopy_min = 1, canopy_max = 2 },
         palm   = { trunk = "palm_trunk",   leaves = "palm_leaves",
                    height_min = 5, height_max = 9,  canopy_min = 2, canopy_max = 3 },
+    },
+
+    -- ── Lava seeding ──────────────────────────────────────────────────────
+    -- 3D noise blobs with a two-segment depth-weighted threshold.
+    -- Layers 1–flat_layer:      constant ~30% coverage (danger zone near bedrock).
+    -- Layers flat–ceiling_layer: threshold rises linearly to 1.0 (gradual fade-out).
+    -- Layers >= ceiling_layer:   no lava (safe dirt/surface zone).
+    -- Lava overrides any tile already placed (solid or cave air) except bedrock.
+    lava = {
+        flat_layer      = 200,   -- max density held constant from wl=1 to here
+        ceiling_layer   = 700,   -- no lava at or above this world-layer
+        noise_scale     = 0.04,  -- blobs ~25 hex wide; lower = larger pockets
+        threshold_floor = 0.70,  -- top 30% of noise → lava in the flat zone
     },
 
     -- ── Soft biome system ─────────────────────────────────────────────────

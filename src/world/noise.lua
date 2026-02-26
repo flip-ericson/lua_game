@@ -253,8 +253,10 @@ Noise.SEED_CAVES     = 4   -- 3D cave carving
 Noise.SEED_MARBLE    = 6   -- marble ribbon bands
 Noise.SEED_GRIMSTONE = 7   -- grimstone per-column floor
 Noise.SEED_DIRT      = 8   -- dirt ceiling depth variation
--- Ore seeds start at 100 — wide gap above named seeds (1–8) so
--- SEED_ORE+i never aliases marble/grimstone/dirt noise.
+Noise.SEED_PLANT     = 9   -- plant rarity / tree dimension salts
+Noise.SEED_LAVA      = 10  -- deep lava blob placement
+-- Ore seeds start at 100 — wide gap above named seeds (1–10) so
+-- SEED_ORE+i never aliases marble/grimstone/dirt/plant/lava noise.
 Noise.SEED_ORE       = 100 -- ore[i] uses hash(seed, SEED_ORE + i)
 
 return Noise

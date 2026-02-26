@@ -33,6 +33,7 @@ local ChunkColumn = require("src.world.chunk")
 local WorldgenCfg = require("config.worldgen")
 local Hex         = require("src.core.hex")
 local Worldgen    = require("src.world.worldgen")
+local Ocean       = require("src.world.ocean")
 
 local CHUNK_SIZE    = ChunkColumn.SIZE    -- 32
 local CHUNK_DEPTH   = ChunkColumn.DEPTH   -- 8
@@ -47,10 +48,16 @@ World.__index = World
 -- ── Constructor ───────────────────────────────────────────────────────────
 
 function World.new()
+    local is_ocean, is_beach = Ocean.build(
+        WORLD_RADIUS,
+        WorldgenCfg.sea_level,
+        WorldgenCfg.island.beach_radius)
     return setmetatable({
         _columns  = {},   -- key → ChunkColumn
         _count    = 0,
         game_time = 0,    -- game minutes elapsed (1 real second = 1 game minute)
+        _is_ocean = is_ocean,
+        _is_beach = is_beach,  -- O(1) lookup; replaces Worldgen.is_beach noise scan
     }, World)
 end
 
@@ -165,9 +172,11 @@ function World:_load_or_generate(col_q, col_r, col_layer)
     local layer_base = col_layer * CHUNK_DEPTH
 
     -- Tile ID cache — looked up once, reused across the entire triple loop.
-    local id_bedrock = TR.id("bedrock")
-    local id_grass   = TR.id("grass")
-    local id_sand    = TR.id("sand")
+    local id_bedrock    = TR.id("bedrock")
+    local id_grass      = TR.id("grass")
+    local id_sand       = TR.id("sand")
+    local id_salt_water = TR.id("salt_water")
+    local id_lava       = TR.id("lava")
     local sub_ids = {
         dirt      = TR.id("dirt"),
         stone     = TR.id("stone"),
@@ -177,6 +186,22 @@ function World:_load_or_generate(col_q, col_r, col_layer)
     for _, ore in ipairs(WorldgenCfg.ores) do
         sub_ids[ore.id] = TR.id(ore.id)
     end
+    -- Tree trunk / leaves IDs (keyed by tile name)
+    for _, tree_def in pairs(WorldgenCfg.trees) do
+        sub_ids[tree_def.trunk]  = TR.id(tree_def.trunk)
+        sub_ids[tree_def.leaves] = TR.id(tree_def.leaves)
+    end
+    -- Cover plant tile IDs
+    for _, plant in ipairs(WorldgenCfg.biome.plants) do
+        if plant.type == "cover" and not sub_ids[plant.id] then
+            sub_ids[plant.id] = TR.id(plant.id)
+        end
+    end
+
+    -- tree_roots: tree columns whose canopy may spread to neighbours.
+    -- Collected during pass 1; canopy tiles written in pass 2 below.
+    -- One entry per tree root: {ql, rl, sl, h, cr, leaves_id}
+    local tree_roots = {}
 
     for ql = 0, CHUNK_SIZE - 1 do
         for rl = 0, CHUNK_SIZE - 1 do
@@ -184,20 +209,30 @@ function World:_load_or_generate(col_q, col_r, col_layer)
             local wr = col_r * CHUNK_SIZE + rl
 
             -- Per-column precomputes (one noise seed switch each).
-            -- Order: TERRAIN → GRIMSTONE → MARBLE → DIRT → TERRAIN (is_beach),
-            -- so the next column's surface_layer call costs no rebuild.
+            -- Order: TERRAIN → GRIMSTONE → MARBLE → DIRT → BIOME_T → BIOME_H (plant_spec).
+            -- is_beach is now an O(1) closure lookup — no perm rebuild needed.
             local sl       = Worldgen.surface_layer(wq, wr)
             local gfloor   = Worldgen.grimstone_floor(wq, wr)
             local marble_n = Worldgen.marble_noise(wq, wr)
             local dirt_dep = Worldgen.dirt_depth(wq, wr)
 
-            -- Surface tile: grass or sand above sea; stone for underwater surface.
-            -- is_beach runs last to leave perm on TERRAIN for the next column.
+            -- Surface tile: grass or sand above sea; sand for ocean floor; stone for inland depressions.
+            local is_col_ocean = self._is_ocean(wq, wr)
             local surface_id
             if sl >= sea then
-                surface_id = Worldgen.is_beach(wq, wr) and id_sand or id_grass
+                surface_id = self._is_beach(wq, wr) and id_sand or id_grass
+            elseif is_col_ocean then
+                surface_id = id_sand        -- ocean floor
             else
-                surface_id = sub_ids.stone
+                surface_id = sub_ids.stone  -- inland depression (no ocean water)
+            end
+
+            -- Plant query: only for above-sea grass columns (not sand / beach).
+            -- Calls biome_temp + biome_humidity (2 perm rebuilds); rarity roll is
+            -- a fast integer hash with no rebuild.
+            local plant = nil
+            if surface_id == id_grass then
+                plant = Worldgen.plant_spec(wq, wr, sl)
             end
 
             for ll = 0, CHUNK_DEPTH - 1 do
@@ -215,16 +250,94 @@ function World:_load_or_generate(col_q, col_r, col_layer)
                     if not Worldgen.is_cave(wq, wr, wl) then
                         local name    = Worldgen.subsurface_tile(sl - wl, wl, gfloor, marble_n, dirt_dep)
                         local tile_id = sub_ids[name]
-                        -- Ore overlay: only replaces stone or grimstone, never dirt or marble.
+                        -- Stone/grimstone zone: lava first, then ores in what remains.
+                        -- Lava runs before ore so ores never spawn suspended in lava.
+                        -- Dirt and marble are unaffected by both.
                         if name == "stone" or name == "grimstone" then
-                            local ore_name = Worldgen.ore_at(wq, wr, wl, sl)
-                            if ore_name then tile_id = sub_ids[ore_name] end
+                            if Worldgen.lava_at(wq, wr, wl) then
+                                tile_id = id_lava
+                            else
+                                local ore_name = Worldgen.ore_at(wq, wr, wl, sl)
+                                if ore_name then tile_id = sub_ids[ore_name] end
+                            end
                         end
                         col:set(ql, rl, ll, tile_id)
                     end
                     -- Carved subsurface: leaves 0 (air) — cave chamber.
+                elseif is_col_ocean and wl <= sea then
+                    -- Ocean water column: sl+1 through sea_level filled with salt_water.
+                    col:set(ql, rl, ll, id_salt_water)
                 end
-                -- wl > sl: air — ChunkColumn is zero-initialised, nothing to write.
+                -- wl > sea, or above-sea non-ocean air: zero-initialised, nothing to write.
+            end
+
+            -- ── Plant placement (above-surface tiles) ─────────────────────
+            if plant then
+                if plant.type == "cover" then
+                    -- Single tile one layer above the surface.
+                    local cover_ll = sl + 1 - layer_base
+                    if cover_ll >= 0 and cover_ll < CHUNK_DEPTH then
+                        col:set(ql, rl, cover_ll, sub_ids[plant.id])
+                    end
+                elseif plant.type == "tree" then
+                    local tree_def     = WorldgenCfg.trees[plant.id]
+                    local h, cr        = Worldgen.tree_dims(wq, wr, plant.id)
+                    local trunk_id     = sub_ids[tree_def.trunk]
+                    local leaves_id    = sub_ids[tree_def.leaves]
+                    -- Trunk: sl+1 through sl+h, in-chunk range only.
+                    for dl = 1, h do
+                        local trunk_ll = sl + dl - layer_base
+                        if trunk_ll >= 0 and trunk_ll < CHUNK_DEPTH then
+                            col:set(ql, rl, trunk_ll, trunk_id)
+                        end
+                    end
+                    -- Collect root for the canopy spread pass.
+                    tree_roots[#tree_roots + 1] = {
+                        ql = ql, rl = rl, sl = sl, h = h, cr = cr,
+                        leaves_id = leaves_id,
+                    }
+                end
+            end
+        end
+    end
+
+    -- ── Canopy spread pass ────────────────────────────────────────────────
+    -- For each tree root collected above, spread leaf tiles to all hex
+    -- columns within canopy_radius in THIS chunk.  Cross-chunk canopy is
+    -- deferred — trees near chunk edges will have clipped canopies for now.
+    --
+    -- Canopy geometry:
+    --   canopy_wl     (= sl + h):     leaves for all neighbour hexes (hex_dist > 0)
+    --   canopy_wl + 1 (one above):    leaves for all hexes within cr (including centre)
+    -- This gives a flat disc with a domed cap — trunk punches through the disc centre.
+    for _, root in ipairs(tree_roots) do
+        local canopy_wl = root.sl + root.h
+        local cr        = root.cr
+        local lid       = root.leaves_id
+        for dql = -cr, cr do
+            for drl = -cr, cr do
+                local hex_d = math.max(math.abs(dql), math.abs(drl), math.abs(dql + drl))
+                if hex_d <= cr then
+                    local tql = root.ql + dql
+                    local trl = root.rl + drl
+                    if tql >= 0 and tql < CHUNK_SIZE
+                    and trl >= 0 and trl < CHUNK_SIZE then
+                        -- disc layer: skip home column centre (trunk is there)
+                        if hex_d > 0 then
+                            local ll = canopy_wl - layer_base
+                            if ll >= 0 and ll < CHUNK_DEPTH
+                            and col:get(tql, trl, ll) == 0 then
+                                col:set(tql, trl, ll, lid)
+                            end
+                        end
+                        -- cap layer: one above trunk-top for all within cr
+                        local ll2 = canopy_wl + 1 - layer_base
+                        if ll2 >= 0 and ll2 < CHUNK_DEPTH
+                        and col:get(tql, trl, ll2) == 0 then
+                            col:set(tql, trl, ll2, lid)
+                        end
+                    end
+                end
             end
         end
     end

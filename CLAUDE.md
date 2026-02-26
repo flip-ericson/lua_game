@@ -7,10 +7,10 @@
 
 ## Current Status
 - **Phase 1 — COMPLETE:** hex math, tile registry, chunk system, camera, basic renderer.
-- **Phase 2 — IN PROGRESS:**
-  - ✅ 2.1 Noise infra · ✅ 2.2 Island shape · ✅ 2.4 Subsurface bands · ✅ 2.5 Ores · ✅ 2.6 Caves
-  - ⏳ 2.3 Biome config defined, impl deferred to before 2.8
-  - Next: **2.7 Water seeding** (ocean flood-fill from world edge)
+- **Phase 2 — COMPLETE:**
+  - ✅ 2.1 Noise infra · ✅ 2.2 Island shape · ✅ 2.3 Biome config · ✅ 2.4 Subsurface bands
+  - ✅ 2.5 Ores · ✅ 2.6 Caves · ✅ 2.7 Ocean BFS (FFI, ~100 MB, beach baked in) · ✅ 2.8 Plants/trees
+- **Next: Phase 3** — but resolve the ⚠️ PIN (chunk load-lag) first; see section below.
 
 ## North Star
 **Efficiency above all.** Design to run well before it looks good. If it lags, it fails.

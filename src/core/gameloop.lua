@@ -17,6 +17,7 @@ local world       -- the active World instance
 local camera      -- Camera instance
 local cam_layer   -- world layer the camera is focused on
 local cam_q, cam_r
+local _saved_zoom, _saved_cam_x, _saved_cam_y  -- restored when overview exits
 
 function GameLoop.load()
     W, H = love.graphics.getDimensions()
@@ -80,8 +81,30 @@ function GameLoop.keypressed(key, scancode, isrepeat)
     if key == "o"   then Renderer.toggle_occlusion() end
 
     -- Debug overlays
-    if key == "f3" then Debug.toggle()     end
-    if key == "f1" then Debug.toggle_hud() end
+    if key == "f3" then Debug.toggle()      end
+    if key == "f1" then Debug.toggle_hud()  end
+    if key == "j"  then Debug.toggle_jade() end
+
+    -- World overview (M): zoom to fit entire world, blue ocean plane, sampled land.
+    -- Only works in overworld mode. Press M again to restore camera position.
+    if key == "m" and Renderer.get_mode() == "overworld" then
+        if not Renderer.get_overview() then
+            _saved_zoom  = camera.zoom
+            _saved_cam_x = camera.x
+            _saved_cam_y = camera.y
+            local R     = WorldgenCfg.world_radius
+            local pw    = 3 * Hex.SIZE * R
+            local ph    = 2 * math.sqrt(3) * Hex.SIZE * R
+            camera.zoom = math.min(W / pw, H / ph) * 0.85
+            camera.x    = 0
+            camera.y    = -WorldgenCfg.sea_level * RenderCfg.layer_height
+        else
+            camera.zoom = _saved_zoom
+            camera.x    = _saved_cam_x
+            camera.y    = _saved_cam_y
+        end
+        Renderer.toggle_overview()
+    end
 
     -- Zoom  (= / + zooms in,  - zooms out)
     if key == "=" or key == "+" then
@@ -92,13 +115,18 @@ function GameLoop.keypressed(key, scancode, isrepeat)
     end
 
     -- Layer shift  ([ = deeper,  ] = higher;  PageUp/PageDown = same;  Home = reset)
+    -- Hold Shift for ×10 jump.
+    local shift = love.keyboard.isDown("lshift") or love.keyboard.isDown("rshift")
+    local layer_step = shift and 20 or 1
     if key == "]" or key == "pageup" then
-        cam_layer = math.min(cam_layer + 1, WorldgenCfg.world_depth - 1)
-        camera.y  = camera.y - RenderCfg.layer_height   -- keep the same hex on screen
+        local delta = math.min(layer_step, WorldgenCfg.world_depth - 1 - cam_layer)
+        cam_layer = cam_layer + delta
+        camera.y  = camera.y - delta * RenderCfg.layer_height
     end
     if key == "[" or key == "pagedown" then
-        cam_layer = math.max(cam_layer - 1, 0)
-        camera.y  = camera.y + RenderCfg.layer_height
+        local delta = math.min(layer_step, cam_layer)
+        cam_layer = cam_layer - delta
+        camera.y  = camera.y + delta * RenderCfg.layer_height
     end
     -- Home: snap back to sea level (swap for player layer once a player exists)
     if key == "home" then
