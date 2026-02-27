@@ -413,7 +413,10 @@ is chosen. Ordered highest-impact first.
 
 3. **Profile before anything else** — wrap generation phases with `os.clock()` and print per phase (terrain noise, subsurface bands, ore pass, cave pass, render build). Find the actual bottleneck. Guessing wastes sessions.
 
-4. **Reduce noise calls** — 3D noise is the most expensive call in the pipeline. Confirm no redundant perm rebuilds (the current design precomputes per-column values to avoid this, but verify with profiling). Fewer octaves for lower-priority systems (ores and caves are already 1 octave — good).
+4. **Reduce noise calls** — 3D noise is the most expensive call in the pipeline. Confirm no redundant perm * Chunk lag happens when too much deterministic work happens in a single frame.
+Control *how much*, *how often*, and *how many at once* — not the size of the world.
+
+---rebuilds (the current design precomputes per-column values to avoid this, but verify with profiling). Fewer octaves for lower-priority systems (ores and caves are already 1 octave — good).
 
 5. **No per-tile allocations inside loops** — creating a `{}` table per tile in the generation loop causes GC spikes that mimic load-lag. ChunkColumn already uses a flat `uint16` array. Keep all generation logic free of table creation inside the triple loop.
 
@@ -429,35 +432,30 @@ is chosen. Ordered highest-impact first.
 
 9. **`love.thread` (Option B above)** — the real fix for combat-safe streaming. But threads fix total throughput; frame budgets fix per-frame spikes. Build the budget system first. Threading an architecture that doesn't already break work into small units just moves the spike into the thread.
 
-**Core principle:** Chunk lag happens when too much deterministic work happens in a single frame.
-Control *how much*, *how often*, and *how many at once* — not the size of the world.
-
----
+**Core principle:*
 
 ### PHASE 3 — Player & Basic Interaction
 *Get the dwarf on screen. Make him move. Make him dig. Make him fall.*
 
-**3.1 — Player Entity** (`src/entity/player.lua`)
-- Position: `(q, r, layer)` for tile address + `(px, py)` pixel offset for smooth sub-tile movement.
-- The dwarf sprite is rectangular pixel art, slightly smaller than a hex side in width so he fits through a 1-hex-wide tunnel without visual clipping.
-- 8-directional facing (or 6, matching hex directions — decide early and stick with it).
-- Inputs: WASD move, Space jump, Shift dash, LMB attack/interact, RMB select/aim.
+**3.1 — Player Entity** ✅ `src/entities/player.lua`
+- World-pixel position `(x, y, z)` — z is float layer index, integer when grounded.
+- WASD movement at 200 px/s. Diagonal normalised (×0.7071).
+- Spritesheet loaded at startup: standing frame (col 0, row 0), airborne frame (col 1, row 4).
+- Depth-injected into painter's algorithm by renderer at the correct row.
+- Shadow ellipse pinned to `floor_z` (doesn't rise during jump).
 
-**3.2 — Vertical Movement & Collision**
-This is the trickiest part of the whole movement system. The 2D/3D transition must feel natural.
+**3.2 — Vertical Movement & Collision** ✅
+- **Physics:** Fixed-rate symmetric arc. `VERT_RATE` drives both rise and fall. `JUMP_HEIGHT` sets peak. `JUMP_DURATION` and `JUMP_SPEED_MUL` are derived — do not hardcode.
+- **Three states:** `jumping` (rise, no floor checks), `falling` (floor check only at integer z crossings), grounded (floor check every frame; start falling if floor disappears).
+- **dt cap:** `MAX_DT = 1/15` — prevents tunnelling at any framerate.
+- **Air control:** `AIR_CONTROL = 0` (locked to launch velocity). `JUMP_SPEED_MUL` scales horizontal velocity at jump launch to target 2.25 × inradius horizontal distance.
+- **Wall collision:** SAT hex-vs-hex. Player hitbox = flat-top regular hexagon, `PLAYER_HEX_R = 24` px circumradius. Checks player's hex + 6 axial neighbours (7 total). 6-axis SAT per solid hex; push along minimum-overlap axis. Exact face alignment — no circle approximation.
+- **Floor detection:** 5-point foot sample (`FOOT_R = 11`). Independent of SAT hitbox.
 
-- **Walking on the surface:** Movement is purely horizontal (q, r). The player "stands" on the top face of the solid tile at `layer` with air at `layer+1`.
-- **Single-layer hop:** If the tile at `(q, r, layer+1)` is solid and the tile at `(q, r, layer+2)` is air → the player can hop up one layer automatically while walking (like a step). No jump input needed for 1-layer steps.
-- **Jump (1 layer):** Explicit jump input. Moves player to `layer+1` if `layer+2` is air. Used for navigating terrain without needing stairs everywhere. Stamina cost or short cooldown to prevent spam.
-- **Cliff face:** 2+ layer height difference → player cannot auto-step or jump. Must find stairs, mine a path, or build one.
-- **Falling:** Each frame, if `(q, r, layer-1)` is air → player falls. Falling is smooth pixel animation downward, not an instant teleport. Fall damage applies beyond a configurable threshold (e.g., 3+ layers).
-- **Stairs tile:** Interacting with a stair tile moves the player to the same `(q, r)` on the adjacent layer. Stairs are craftable and placeable.
-
-**3.3 — Layer Visibility**
-- **Underground (default when below surface):** Show the player's current layer as the "floor" and the layer above as "walls/ceiling." Tiles further below are not rendered. Tiles above are semi-transparent if they would occlude the player (like looking down into a room).
-- **Overworld (default at surface):** True top-down view. Tiles directly above the player (overhangs, tree canopy) rendered at ~40% opacity so you can see through them.
-- **Auto-toggle:** Switches based on whether the player is below the surface layer of their current column.
-- **Manual toggle:** Keybind to override the auto-switch.
+**3.3 — Layer Visibility** ✅ (overworld canopy done; underground toggle deferred)
+- **Canopy opacity:** `TileRegistry.TRANSPARENT[id]` tiles render at 50% alpha in the vegetation pass. All leaf variants transparent; bush/trunk opaque.
+- **Trunk rendering:** Top face draws if tile above is air or transparent (leaves no longer hide trunk tops). Side faces draw if neighbour is air or transparent.
+- **Underground auto-toggle:** deferred — implement alongside 3.8 underground lighting.
 
 **3.4 — Mining**
 - Player aims at an adjacent hex (within reach, drawn with a highlight ring).
@@ -916,6 +914,26 @@ Currently each tile has one `drop_item` string. Eventually tiles should
 support weighted drop tables with tool requirements:
 `drops = { { item = "coal", count = {1,3}, min_tool = "pickaxe" }, ... }`
 Defer until the item and crafting systems exist (Phases 3.7 / 6).
+
+---
+
+## Polish (Deferred)
+
+Items accepted as "good enough for alpha" with a known root cause. Collect here so they are not lost; revisit in a dedicated polish pass after core gameplay is solid.
+
+### Painter's Algorithm Edge-Clip
+**Symptom:** Player sprite briefly appears behind tiles for 1–2 frames when crossing a hex row boundary. Most visible when moving west (screen-left).
+
+**Root cause:** The painter's algorithm depth-sorts entities by their axial hex row (`player.r`), which is an integer that snaps at hex boundaries. The sprite, however, moves continuously in world-pixel space. For the frame(s) when the player's visual position straddles two rows, the row key does not match the sprite's visual depth, causing a momentary clip.
+
+**Why it is worse moving west:** In flat-top axial coordinates, moving screen-left (−x) simultaneously decreases `q` *and* increases `r` (because `r = (−px/3 + py√3/3) / SIZE`). Row transitions therefore happen more frequently per unit distance than when moving east or north/south.
+
+**Real fix:** Per-pixel depth compositing, a depth buffer, or a Y-sorted sprite layer separate from the tile pass. All require a different rendering architecture.
+
+**Practical mitigations (deferred):**
+1. Collision (Phase 3.2) — player stays on valid surface tiles, reducing continuous mid-hex traversal.
+2. PNG sprite transparency — once vegetation tiles use real sprites with alpha, the "clipping behind a tree" case is largely invisible.
+3. Sub-row injection — compute painter row from the sprite *foot* pixel rather than the hex centre (minor improvement, complex to tune).
 
 ---
 

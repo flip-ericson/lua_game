@@ -14,7 +14,7 @@ return {
     -- Controls how tall cliff-face side strips appear and how much
     -- of the layer below peeks out beneath the layer above.
     -- Higher = more dramatic depth. Lower = flatter, more top-down.
-    layer_height = 20,
+    layer_height = 48,
 
     -- How many layers below the player's layer to render in underground mode.
     layers_below = 2,

@@ -150,7 +150,7 @@ return {
     },
     {
         id = 16, name = "bush",   category = "organic",
-        solid = true,  hardness = 0.5,  transparent = true,
+        solid = true,  hardness = 0.5,  transparent = false,
         luminous = 0,  liquid = false,  drop_item = "wood_stick",
         color = { 0.18, 0.44, 0.10 },
     },

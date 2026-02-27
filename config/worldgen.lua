@@ -39,6 +39,7 @@ local PRESETS = {
         world_radius = 64,
         world_depth  = 48,   -- 6 vertical chunks; headroom for trees above sea
         sea_level    = 24,   -- surface sits at layer 24 (3 chunks up from bedrock)
+        preload_all  = true, -- generate every chunk at startup (only safe for tiny worlds)
         island = {
             sigma           = 93,
             falloff_n       = 1.5,
@@ -99,7 +100,8 @@ assert(preset, "Unknown PRESET '" .. tostring(PRESET) .. "' — use debug/small/
 return {
     seed         = 12345,
     world_radius = preset.world_radius,
-    world_depth  = preset.world_depth or 1024,
+    world_depth  = preset.world_depth  or 1024,
+    preload_all  = preset.preload_all  or false,
 
     sea_level = preset.sea_level or 768,
 

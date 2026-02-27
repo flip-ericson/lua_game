@@ -100,7 +100,7 @@ end
 
 -- ── Underground renderer ───────────────────────────────────────────────────
 
-local function draw_underground(world, cam, center_layer)
+local function draw_underground(world, cam, center_layer, player)
     local W, H   = love.graphics.getDimensions()
     local zoom   = cam.zoom
     local half_w = W / (2 * zoom)
@@ -174,6 +174,11 @@ local function draw_underground(world, cam, center_layer)
                 end
             end
         end
+        -- Depth-correct player: drawn after all tiles in this row so forward
+        -- rows paint on top of the player (painter's algorithm).
+        if player and player.r == r then
+            player:draw_world(center_layer)
+        end
     end
 
     -- Hover outline.
@@ -194,7 +199,7 @@ end
 
 -- ── Overworld renderer ─────────────────────────────────────────────────────
 
-local function draw_overworld(world, cam)
+local function draw_overworld(world, cam, player)
     local W, H   = love.graphics.getDimensions()
     local zoom   = cam.zoom
     local half_w = W / (2 * zoom)
@@ -366,23 +371,35 @@ local function draw_overworld(world, cam)
                     local def = tid and tid ~= 0 and TileRegistry.get(tid)
                     if def and def.category == "organic"
                         and not (DBG_HIDE_LEAVES and def.name:find("leaves")) then
-                        local vv = hex_verts(px, py - vl * LAYER_HEIGHT)
-                        -- Side faces: draw where the neighbour at the same layer is air.
+                        local vv    = hex_verts(px, py - vl * LAYER_HEIGHT)
+                        local alpha = TileRegistry.TRANSPARENT[tid] and 0.5 or 1.0
+                        -- Side faces: draw where the neighbour is air or transparent.
                         local sc = TileRegistry.COLOR_SIDE[tid]
-                        love.graphics.setColor(sc[1], sc[2], sc[3])
-                        if world:get_tile(q+1, r,   vl) == 0 then draw_side(vv[1], vv[2], vv[3], vv[4]) end
-                        if world:get_tile(q,   r+1, vl) == 0 then draw_side(vv[3], vv[4], vv[5], vv[6]) end
-                        if world:get_tile(q-1, r+1, vl) == 0 then draw_side(vv[5], vv[6], vv[7], vv[8]) end
-                        -- Top face: only for the topmost tile in this column (nothing above).
-                        if world:get_tile(q, r, vl + 1) == 0 then
+                        love.graphics.setColor(sc[1], sc[2], sc[3], alpha)
+                        local n1 = world:get_tile(q+1, r,   vl)
+                        local n2 = world:get_tile(q,   r+1, vl)
+                        local n3 = world:get_tile(q-1, r+1, vl)
+                        if n1 == 0 or TileRegistry.TRANSPARENT[n1] then draw_side(vv[1], vv[2], vv[3], vv[4]) end
+                        if n2 == 0 or TileRegistry.TRANSPARENT[n2] then draw_side(vv[3], vv[4], vv[5], vv[6]) end
+                        if n3 == 0 or TileRegistry.TRANSPARENT[n3] then draw_side(vv[5], vv[6], vv[7], vv[8]) end
+                        -- Top face: draw unless blocked by an opaque tile above.
+                        local above = world:get_tile(q, r, vl + 1)
+                        if above == 0 or TileRegistry.TRANSPARENT[above] then
                             local tc = TileRegistry.COLOR[tid]
-                            love.graphics.setColor(tc[1], tc[2], tc[3])
+                            love.graphics.setColor(tc[1], tc[2], tc[3], alpha)
                             love.graphics.polygon("fill", vv)
                         end
                     end
                 end
             end
             ::continue::
+        end
+        -- Depth-correct player: inject after each row so tiles with higher r
+        -- (visually in front) paint over the player correctly.
+        -- Overworld: player sits at their surface layer, not a fixed cam_layer.
+        if player and not overview_mode and player.r == r then
+            local pl_dl = math.max(Worldgen.surface_layer(player.q, player.r), sea)
+            player:draw_world(pl_dl)
         end
     end
 
@@ -412,11 +429,11 @@ end
 
 -- ── Public draw ────────────────────────────────────────────────────────────
 
-function Renderer.draw(world, cam, center_layer)
+function Renderer.draw(world, cam, center_layer, player)
     if render_mode == "overworld" then
-        draw_overworld(world, cam)
+        draw_overworld(world, cam, player)
     else
-        draw_underground(world, cam, center_layer)
+        draw_underground(world, cam, center_layer, player)
     end
 end
 

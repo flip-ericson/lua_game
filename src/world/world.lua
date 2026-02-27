@@ -150,6 +150,30 @@ function World:loaded_count()
     return self._count
 end
 
+-- ── Full preload (debug / small worlds only) ───────────────────────────────
+-- Generates every chunk column in the world without triggering LRU eviction.
+-- Safe to call at startup (loading screen) for worlds where full preload is
+-- feasible.  Large worlds (radius > 200) must use lazy preload_near instead.
+
+function World:preload_all()
+    local cq_max = math.ceil(WORLD_RADIUS / CHUNK_SIZE)
+    local cl_max = MAX_COL_LAYER
+
+    for cq = -cq_max, cq_max do
+        for cr = -cq_max, cq_max do
+            for cl = 0, cl_max do
+                local key = ChunkColumn.key(cq, cr, cl)
+                if not self._columns[key] then
+                    local col      = self:_load_or_generate(cq, cr, cl)
+                    col.last_used  = love.timer.getTime()
+                    self._columns[key] = col
+                    self._count        = self._count + 1
+                end
+            end
+        end
+    end
+end
+
 -- ── Column generation (Phase 2.2 – 2.5) ──────────────────────────────────
 -- Uses Worldgen.surface_layer(q, r) for the island height map.
 -- Tile assignment per world-layer wl, given surface layer sl:

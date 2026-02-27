@@ -10,7 +10,11 @@
 - **Phase 2 — COMPLETE:**
   - ✅ 2.1 Noise infra · ✅ 2.2 Island shape · ✅ 2.3 Biome config · ✅ 2.4 Subsurface bands
   - ✅ 2.5 Ores · ✅ 2.6 Caves · ✅ 2.7 Ocean BFS (FFI, ~100 MB, beach baked in) · ✅ 2.8 Plants/trees
-- **Next: Phase 3** — but resolve the ⚠️ PIN (chunk load-lag) first; see section below.
+- **Phase 3 — IN PROGRESS:**
+  - ✅ 3.1 Player entity — WASD, world-pixel position, spritesheet (static + airborne frame), painter's-algo depth injection
+  - ✅ 3.2 Vertical physics & collision — fixed-rate physics (VERT_RATE), three-state system (jumping/falling/grounded), integer-boundary floor checks, dt cap, shadow, SAT hex-vs-hex wall collision, air control + jump speed multiplier
+  - ✅ 3.3 Layer visibility — canopy opacity (transparent tiles render at 50% alpha), trunk top/side rendering through transparent neighbours
+  - 🔲 3.4 Mining — **next up**
 
 ## North Star
 **Efficiency above all.** Design to run well before it looks good. If it lags, it fails.
@@ -27,7 +31,7 @@
 | Renderer | Painter's algorithm: layer asc → row asc → col. Side faces culled per-frame via neighbor check. Do NOT precompute face visibility unless profiling proves it's a bottleneck. |
 | Game clock | 1 real second = 1 game minute. `world.game_time` += `dt` each frame. |
 | Tick system | Per-chunk sorted `tick_list` `{idx, next_stage_time}`. register_tick on place, deregister_tick on remove/harvest. |
-| Render config | hex_size=48, layer_height=20, layers_above=1, layers_below=2, cam_speed=400. |
+| Render config | hex_size=48, layer_height=48, layers_above=1, layers_below=2, cam_speed=400. |
 
 ## Performance Rules (Non-Negotiable)
 - Never iterate all tiles every frame. Dirty flags and event queues only.
@@ -54,9 +58,10 @@ src/core/gameloop.lua        → LÖVE2D callbacks, camera panning, zoom, layer 
 src/core/debug.lua           → F3=toggle all, F1=toggle HUD, H=toggle hex grid
 src/world/chunk.lua          → ChunkColumn: data, meta, tick_list, register/deregister_tick
 src/world/world.lua          → World cache, get/set_tile, preload_near, game_time
-src/world/tile_registry.lua  → SOLID/HARDNESS/COLOR/COLOR_SIDE flat arrays (hot path)
+src/world/tile_registry.lua  → SOLID/TRANSPARENT/HARDNESS/COLOR/COLOR_SIDE flat arrays (hot path)
 src/render/camera.lua        → Camera: apply/reset, world_to_screen, screen_to_world
-src/render/renderer.lua      → Tile draw: painter order, face culling, hover highlight
+src/render/renderer.lua      → Tile draw: painter order, face culling, hover highlight, canopy alpha
+src/entities/player.lua      → Player: world-pixel pos, SAT collision, fixed-rate physics, sprite
 config/tiles.lua             → 30 tile definitions, IDs 0–29, never renumber
 config/worldgen.lua          → seed, world dims, sea_level, ore/cave/tree params
 config/render.lua            → hex_size, layer_height, layers_above/below, cam_speed
@@ -69,6 +74,21 @@ config/dwarf_island_v4.md    → full design doc, phase breakdown, architecture 
 - Caves: anisotropic 3D noise threshold=0.98, scale_h=0.010, scale_v=0.050, ~2% of subsurface tiles, 5:1 elongation ratio, surface breaching allowed
 - Trees: oak/birch/spruce/palm per species, height 3–10, canopy 1–4 (Phase 2.8)
 - Island: radial falloff + sigmoid, 4-octave noise, surface_floor=720, surface_peak=820, sea_level=768
+
+## Player Physics Constants (player.lua — tune here)
+| Constant | Value | Notes |
+|---|---|---|
+| `SPEED` | 200 px/s | Ground movement speed |
+| `VERT_RATE` | 4.75 layers/s | Rise AND fall — change this, everything derives |
+| `JUMP_HEIGHT` | 1.25 layers | Peak height — change this, duration + multiplier auto-derive |
+| `JUMP_SPEED_MUL` | derived | 2.25 × inradius ÷ (SPEED × airtime) — do not hardcode |
+| `AIR_CONTROL` | 0.0 | 0 = locked to launch velocity; 1 = full steering |
+| `PLAYER_HEX_R` | 24 px | SAT hitbox circumradius — half of tile size |
+
+## Polish (Deferred — not forgotten)
+Items accepted as "good enough for alpha" with a known root cause. Revisit in a dedicated polish pass.
+- **Painter's algorithm edge-clip** — player sprite briefly pops behind tiles when crossing a hex row boundary; most visible moving west. Root cause: `player.r` is a discrete integer that snaps at hex boundaries while the sprite position moves continuously. Real fix: per-pixel depth compositing or a depth buffer (different rendering architecture). Natural mitigation: collision (3.2) stops mid-hex drifting; PNG sprite transparency hides vegetation clips.
+- **Leaf side-face culling** — transparent leaf tiles don't cull side faces against each other inside the canopy. Visually harmless for now; will be replaced entirely by sprites.
 
 ## Noted Ideas (deferred, not forgotten)
 - Tile gravity (sand/gravel) + structural support simulation (post-Phase 8)
