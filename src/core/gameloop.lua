@@ -112,7 +112,7 @@ function GameLoop.update(dt)
     end
 
     cam_q, cam_r = player.q, player.r
-    cam_layer    = player.layer
+    cam_layer    = player.layer + 1  -- wall layer: floor is layer, body/walls are layer+1
 
     world:preload_near(cam_q, cam_r, cam_layer)
 end
