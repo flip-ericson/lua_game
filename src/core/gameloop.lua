@@ -107,6 +107,13 @@ function GameLoop.load()
     player.inventory[4] = { item_id = ItemRegistry.id("stone_chunk"), count = 5 }
     player.inventory[5] = { item_id = ItemRegistry.id("stick"),       count = 5 }
 
+    -- Tile placement test: 99 of each placeable tile in hotbar slots 6–10.
+    player.inventory[6]  = { item_id = ItemRegistry.id("dirt_tile"),      count = 99 }
+    player.inventory[7]  = { item_id = ItemRegistry.id("sand_tile"),      count = 99 }
+    player.inventory[8]  = { item_id = ItemRegistry.id("stone_tile"),     count = 99 }
+    player.inventory[9]  = { item_id = ItemRegistry.id("marble_tile"),    count = 99 }
+    player.inventory[10] = { item_id = ItemRegistry.id("grimstone_tile"), count = 99 }
+
     -- Unlock default recipes.
     for _, recipe in ipairs(Recipes) do
         if recipe.learned_by_default then
@@ -300,6 +307,42 @@ function GameLoop.mousepressed(x, y, button, istouch, presses)
             local hp = world:damage_tile(hq, hr, hl, dmg)
             if hp <= 0 then
                 break_tile(hq, hr, hl)
+            end
+        end
+    end
+
+    if button == 2 and not player.backpack_open and not Hotbar.hit_test(x, y) then
+        local slot      = player.inventory[player.hotbar_slot]
+        local held_id   = slot and slot.item_id ~= 0 and slot.item_id or nil
+        local place_tid = held_id and ItemRegistry.PLACES_TILE[held_id] or 0
+
+        if place_tid ~= 0 then
+            local hq, hr, hl = Renderer.get_hover()
+            local face = Renderer.get_hover_face()
+            if hq and face ~= nil and Renderer.get_hover_in_reach() then
+                local FACE_NBR = {
+                    [0] = { 0,  0,  1 },   -- top  → layer above
+                    [1] = { 1,  0,  0 },   -- E    → east neighbor
+                    [2] = { 0,  1,  0 },   -- SE   → southeast neighbor
+                    [3] = {-1,  1,  0 },   -- SW   → southwest neighbor
+                }
+                local off = FACE_NBR[face]
+                if off then
+                    local tq, tr, tl = hq + off[1], hr + off[2], hl + off[3]
+                    local existing   = world:get_tile(tq, tr, tl)
+                    -- Block if target overlaps the player's body (same hex, layer or layer+1).
+                    local blocks_player = (tq == player.q and tr == player.r
+                                          and tl >= player.layer and tl <= player.layer + 1)
+                    -- Only place if target is not solid and not inside the player.
+                    if not TileRegistry.SOLID[existing] and not blocks_player then
+                        world:set_tile(tq, tr, tl, place_tid)
+                        slot.count = slot.count - 1
+                        if slot.count <= 0 then
+                            slot.item_id = 0
+                            slot.count   = 0
+                        end
+                    end
+                end
             end
         end
     end

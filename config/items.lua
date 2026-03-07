@@ -241,26 +241,31 @@ return {
         id = 32, name = "dirt_tile",       display_name = "Dirt Tile",
         max_stack = 99, category = "block", weight = 0.3,
         sprite = "assests/items/item_tile_dirt.png",
+        places_tile = "dirt",
     },
     {
         id = 33, name = "sand_tile",       display_name = "Sand Tile",
         max_stack = 99, category = "block", weight = 0.4,
         sprite = "assests/items/item_tile_sand.png",
+        places_tile = "sand",
     },
     {
         id = 34, name = "stone_tile",      display_name = "Stone Tile",
         max_stack = 99, category = "block", weight = 0.8,
         sprite = "assests/items/item_tile_stone.png",
+        places_tile = "stone",
     },
     {
         id = 35, name = "marble_tile",     display_name = "Marble Tile",
         max_stack = 99, category = "block", weight = 0.9,
         sprite = "assests/items/item_tile_marble.png",
+        places_tile = "marble",
     },
     {
         id = 36, name = "grimstone_tile",  display_name = "Grimstone Tile",
         max_stack = 99, category = "block", weight = 1.0,
         sprite = "assests/items/item_tile_grimstone.png",
+        places_tile = "grimstone",
     },
 
     -- ── Add new items below this line. Never renumber above. ─────────────

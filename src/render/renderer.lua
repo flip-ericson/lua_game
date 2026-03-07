@@ -30,7 +30,7 @@ local sqrt3 = math.sqrt(3)
 
 -- ── Mining reach ──────────────────────────────────────────────────────────
 -- 3D face-centre distance check (px).  Tune here.
-local MINING_REACH = 84
+local MINING_REACH = 120
 
 -- Face centre offsets {dx, dy, vert_layer_offset} relative to tile hex centre.
 -- vert_layer_offset added to tile layer gives the face's height in layer units.

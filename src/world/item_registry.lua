@@ -17,6 +17,8 @@
 -- REVERSE CATEGORY LOOKUP
 --   ItemRegistry.by_category["tool"] → array of IDs in that category
 
+local TileRegistry = require("src.world.tile_registry")
+
 local ItemRegistry = {}
 
 -- ── Public flat arrays (populated by load()) ─────────────────────────────
@@ -29,6 +31,7 @@ ItemRegistry.MAX_STACK      = {}
 ItemRegistry.CATEGORY       = {}
 ItemRegistry.WEIGHT         = {}
 ItemRegistry.SPRITE         = {}   -- loaded Image object, nil if no sprite defined
+ItemRegistry.PLACES_TILE    = {}   -- [item_id] = tile_id to place, or 0 if not placeable
 
 ItemRegistry.by_category = {}  -- by_category["tool"] = { 26, 27, 28, 29 }
 
@@ -70,6 +73,7 @@ function ItemRegistry.load()
         ItemRegistry.MAX_STACK[id]      = def.max_stack      or 1
         ItemRegistry.CATEGORY[id]       = def.category       or "material"
         ItemRegistry.WEIGHT[id]         = def.weight         or 0
+        ItemRegistry.PLACES_TILE[id]    = (def.places_tile and TileRegistry.id(def.places_tile)) or 0
 
         -- Sprite image — loaded once at startup, nil if no path provided.
         -- Uses love.filesystem.getInfo to verify the file exists before loading,

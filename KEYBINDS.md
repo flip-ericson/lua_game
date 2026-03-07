@@ -1,5 +1,11 @@
 # Dwarf Island V4 — Keybinds
 
+## World Interaction
+| Key | Action |
+|-----|--------|
+| `LMB` | Mine hovered tile |
+| `RMB` (holding block item) | Place block flush against hovered face |
+
 ## Player Movement
 | Key | Action |
 |-----|--------|
