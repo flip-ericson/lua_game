@@ -8,7 +8,7 @@
 --   TileRegistry.SOLID[id]        → bool    collision / pathfinding
 --   TileRegistry.TRANSPARENT[id]  → bool    lighting + canopy-opacity renderer
 --   TileRegistry.LIQUID[id]       → bool    water / lava physics
---   TileRegistry.HARDNESS[id]     → number  base mining difficulty (type-level)
+--   TileRegistry.MAX_HEALTH[id]   → number  base mining HP (type-level)
 --   TileRegistry.LUMINOUS[id]     → number  light radius emitted (0 = dark)
 --   TileRegistry.CATEGORY[id]     → string  "special"|"surface"|"stone"|"ore"|
 --                                            "liquid"|"organic"
@@ -26,7 +26,7 @@ local TileRegistry = {}
 TileRegistry.SOLID       = {}
 TileRegistry.TRANSPARENT = {}
 TileRegistry.LIQUID      = {}
-TileRegistry.HARDNESS    = {}
+TileRegistry.MAX_HEALTH  = {}
 TileRegistry.LUMINOUS    = {}
 TileRegistry.CATEGORY    = {}
 TileRegistry.COLOR       = {}
@@ -55,8 +55,8 @@ local VALID_CATEGORIES = {
 }
 
 local REQUIRED = {
-    "id", "name", "category", "solid", "hardness",
-    "transparent", "luminous", "liquid", "color",
+    "id", "name", "category", "solid", "max_health",
+    "transparent", "luminous", "liquid", "drops", "color",
 }
 
 local function validate(def, index)
@@ -109,7 +109,7 @@ function TileRegistry.load()
         TileRegistry.SOLID[id]       = def.solid
         TileRegistry.TRANSPARENT[id] = def.transparent
         TileRegistry.LIQUID[id]      = def.liquid
-        TileRegistry.HARDNESS[id]    = def.hardness
+        TileRegistry.MAX_HEALTH[id]  = def.max_health
         TileRegistry.LUMINOUS[id]    = def.luminous
         TileRegistry.CATEGORY[id]    = def.category
         TileRegistry.COLOR[id]       = def.color

@@ -88,6 +88,7 @@
 - [ ] Rose          (impl) id 27 — non-solid flower; warm-humid zones
 - [ ] Lavender      (impl) id 28 — non-solid flower; hot-dry zones
 - [ ] Daisy         (impl) id 29 — non-solid flower; cool zones
+- [ ] Thornbush     (idea) — dense thorny shrub; contact damage to player; blocks movement like bush; drops sticks; found in hot-dry and savanna biomes
 - [ ] Mushroom      (idea) — dark forest floors and caves; edible (small heal); spreads via mycelium tick behaviour
 - [ ] Mushroom Cap  (idea) — giant mushroom top; deep underground; glows faintly; exotic biome marker
 - [ ] Kelp          (idea) — underwater; grows upward from ocean floor; harvested for food and rope

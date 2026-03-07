@@ -8,6 +8,7 @@
 --               Fall: 1 layer/s, floor check every frame, snap only on
 --               integer crossing (< 3px visual). Jump: fixed-rate ascent,
 --               1.5-tile clearance, no hover math. dt capped at 1/15.
+-- Phase 3.4   — inventory (30 slots), hotbar_slot selection.
 
 local Hex          = require("src.core.hex")
 local RenderCfg    = require("config.render")
@@ -93,6 +94,23 @@ function Player.new(x, y, layer)
         falling  = false,
         jump_t   = 0,     -- seconds of ascent remaining
         floor_z  = layer, -- last known ground layer; shadow always uses this
+
+        -- ── Inventory ─────────────────────────────────────────────────────
+        -- 154 flat slots. Slots 1–10 are the hotbar; slots 11–154 are the
+        -- 12×12 backpack. Each slot: { item_id = 0, count = 0 }. item_id 0 = empty.
+        inventory    = (function()
+            local inv = {}
+            for i = 1, 154 do inv[i] = { item_id = 0, count = 0 } end
+            return inv
+        end)(),
+        hotbar_slot   = 1,     -- 1–10; currently selected hotbar slot
+        backpack_open = false, -- true while the backpack UI is visible
+
+        -- ── Crafting ──────────────────────────────────────────────────────
+        -- Set of recipe IDs the player has learned. { [id] = true }
+        -- Populated at startup from recipes.lua learned_by_default,
+        -- then extended by scrolls / NPC teaching / discovery at runtime.
+        known_recipes = {},
     }, Player)
     p.q, p.r = Hex.pixel_to_hex(x, y)
     return p

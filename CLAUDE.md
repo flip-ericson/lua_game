@@ -13,7 +13,7 @@
 - **Phase 3 — IN PROGRESS:**
   - ✅ 3.1 Player entity — WASD, world-pixel position, spritesheet (static + airborne frame), painter's-algo depth injection
   - ✅ 3.2 Vertical physics & collision — fixed-rate physics (VERT_RATE), three-state system (jumping/falling/grounded), integer-boundary floor checks, dt cap, shadow, SAT hex-vs-hex wall collision, air control + jump speed multiplier
-  - ✅ 3.3 Layer visibility — canopy opacity (transparent tiles render at 50% alpha), trunk top/side rendering through transparent neighbours
+  - ✅ 3.3 Layer visibility + Hex Selection System — canopy opacity, trunk rendering, underground transparency parity, face-accurate inline hit-test (painter order, last-writer-wins), occlusion (gray for fully-buried tiles, ??? in jade), underground renders all layers from 0→center_layer (not just LAYERS_BELOW slice)
   - 🔲 3.4 Mining — **next up**
 
 ## North Star
@@ -26,7 +26,7 @@
 | World size | 8192×8192×1024 tiles. Sea level = layer 768. Bedrock = layer 0. |
 | Chunk geometry | 32×32×8 tiles. CHUNK_SIZE=32 (h), CHUNK_DEPTH=8 (v). 128 vertical chunk layers. |
 | Chunk loading | 7 horizontal × 3 vertical = 21 chunks. MAX_COLUMNS=128 LRU cache. |
-| Tile IDs | uint16. 0=air, 1=bedrock. Never renumber. No `mineable` field — bedrock uses `hardness=math.huge`. |
+| Tile IDs | uint16. 0=air, 1=bedrock. Never renumber. No `mineable` field — bedrock uses `max_health=math.huge`. |
 | Tile categories | `"special"`, `"surface"`, `"stone"`, `"ore"`, `"liquid"`, `"organic"` |
 | Renderer | Painter's algorithm: layer asc → row asc → col. Side faces culled per-frame via neighbor check. Do NOT precompute face visibility unless profiling proves it's a bottleneck. |
 | Game clock | 1 real second = 1 game minute. `world.game_time` += `dt` each frame. |
@@ -58,9 +58,9 @@ src/core/gameloop.lua        → LÖVE2D callbacks, camera panning, zoom, layer 
 src/core/debug.lua           → F3=toggle all, F1=toggle HUD, H=toggle hex grid
 src/world/chunk.lua          → ChunkColumn: data, meta, tick_list, register/deregister_tick
 src/world/world.lua          → World cache, get/set_tile, preload_near, game_time
-src/world/tile_registry.lua  → SOLID/TRANSPARENT/HARDNESS/COLOR/COLOR_SIDE flat arrays (hot path)
+src/world/tile_registry.lua  → SOLID/TRANSPARENT/MAX_HEALTH/COLOR/COLOR_SIDE flat arrays (hot path)
 src/render/camera.lua        → Camera: apply/reset, world_to_screen, screen_to_world
-src/render/renderer.lua      → Tile draw: painter order, face culling, hover highlight, canopy alpha
+src/render/renderer.lua      → Tile draw: painter order, face culling, canopy alpha, inline hover hit-test (get_hover/get_hover_occluded), selection outline injected in painter order
 src/entities/player.lua      → Player: world-pixel pos, SAT collision, fixed-rate physics, sprite
 config/tiles.lua             → 30 tile definitions, IDs 0–29, never renumber
 config/worldgen.lua          → seed, world dims, sea_level, ore/cave/tree params
@@ -89,9 +89,14 @@ config/dwarf_island_v4.md    → full design doc, phase breakdown, architecture 
 Items accepted as "good enough for alpha" with a known root cause. Revisit in a dedicated polish pass.
 - **Painter's algorithm edge-clip** — player sprite briefly pops behind tiles when crossing a hex row boundary; most visible moving west. Root cause: `player.r` is a discrete integer that snaps at hex boundaries while the sprite position moves continuously. Real fix: per-pixel depth compositing or a depth buffer (different rendering architecture). Natural mitigation: collision (3.2) stops mid-hex drifting; PNG sprite transparency hides vegetation clips.
 - **Leaf side-face culling** — transparent leaf tiles don't cull side faces against each other inside the canopy. Visually harmless for now; will be replaced entirely by sprites.
+- **Crack overlay** — 3-stage damage visualization drawn on the tile face (33% / 66% / 90% thresholds). Deferred from 3.4; jade HP line is sufficient feedback for alpha. Implement alongside tile sprites so the overlay art fits the final face geometry.
+- **Player obscured by solid tiles** — when standing inside a hole, solid tiles above render on top of the player. Two options: (A) render tiles in the player's column above `cam_layer` at low alpha; (B) auto-switch to underground mode when tile above player is solid. Revisit with Phase 3.8 underground lighting.
+- **Collision loss in holes** — when obscured inside a hole, surrounding tiles may fall outside the loaded set, causing SAT wall collision to silently fail. Fix: `preload_near` must always cover the player's immediate 7-hex ring regardless of render culling.
+- **Underground staircase layer offset** — `cam_layer = player.layer + 1` feels cramped when staircasing upward through tunnels; the passage roof lands exactly at the render cutoff. Consider `player.layer + 2` in underground mode for one extra layer of headroom.
 
 ## Noted Ideas (deferred, not forgotten)
 - Tile gravity (sand/gravel) + structural support simulation (post-Phase 8)
 - Tile spread (grass→dirt, mycelium, fire) via `behavior` table on tile defs
 - Tool–category efficiency multiplier table in `config/balance.lua`
 - Richer drop tables with weighted entries and min_tool requirements
+- **Tree felling cascade** — when a trunk tile breaks, BFS/flood-fill all connected organic tiles (trunk + leaves) that are now unsupported (no solid non-organic tile below them) and break them all, rolling their drop tables. Prevents orphaned floating canopies. Scope: `break_tile` triggers a BFS from the broken position; visited set prevents re-visiting; cap the search (e.g. 200 tiles) to avoid runaway cost on large trees.

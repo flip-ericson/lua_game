@@ -17,6 +17,7 @@ local Debug = {}
 local show_all  = true
 local show_hud  = true
 local show_jade = true
+local instamine = false
 
 -- ── Toggles ───────────────────────────────────────────────────────────────
 
@@ -30,6 +31,14 @@ end
 
 function Debug.toggle_jade()
     show_jade = not show_jade
+end
+
+function Debug.toggle_instamine()
+    instamine = not instamine
+end
+
+function Debug.instamine_on()
+    return instamine
 end
 
 -- ── FPS / HUD ─────────────────────────────────────────────────────────────
@@ -48,14 +57,13 @@ local function draw_hud(cam, cam_layer, sea_level)
     else                  depth_tag = "sea"
     end
 
-    local mode_tag  = Renderer.get_mode()
-    local occl_tag  = Renderer.get_occlusion() and "occl:on" or "occl:OFF"
+    local mode_tag = Renderer.get_mode()
 
     love.graphics.setColor(0.35, 0.35, 0.45)
     love.graphics.print(
-        string.format("FPS:%d  |  %s  |  layer %d (%s)  |  (%d,%d)  |  %s  |  Tab  PgUp/Dn  Home  O  F1  F3",
-            love.timer.getFPS(), mode_tag, cam_layer, depth_tag, hq, hr, occl_tag),
-        10, H - 22
+        string.format("FPS:%d  |  %s  |  layer %d (%s)  |  (%d,%d)  |  Tab  PgUp/Dn  Home  O  X  H  F3",
+            love.timer.getFPS(), mode_tag, cam_layer, depth_tag, hq, hr),
+        10, 10
     )
 end
 
@@ -63,8 +71,8 @@ end
 -- Shows the name of the topmost tile under the hex cursor, top-center.
 -- Independent of the F3 master switch — it's a gameplay UI element.
 
-local function draw_jade()
-    local _, _, _, tile_id = Renderer.get_hover()
+local function draw_jade(world)
+    local hq, hr, hl, tile_id = Renderer.get_hover()
     if not tile_id or tile_id == 0 then return end
 
     local W    = love.graphics.getWidth()
@@ -76,10 +84,52 @@ local function draw_jade()
         name = def and def.name or "unknown"
     end
 
-    local font   = love.graphics.getFont()
-    local text_w = font:getWidth(name)
+    -- Health line: reads from world.tile_damage sparse table (may not exist yet).
+    local max_hp  = TileRegistry.MAX_HEALTH[tile_id] or 1
+    local dmg     = 0
+    if world.tile_damage and hq then
+        local by_q = world.tile_damage[hq]
+        local by_r = by_q and by_q[hr]
+        dmg = (by_r and by_r[hl]) or 0
+    end
+    local max_str = max_hp == math.huge and "\xe2\x88\x9e" or tostring(math.floor(max_hp))
+    local cur_str = max_hp == math.huge and "\xe2\x88\x9e" or tostring(math.max(0, math.floor(max_hp - dmg)))
+    local hp_line = "HP: " .. cur_str .. " / " .. max_str
+
+    local font = love.graphics.getFont()
+    local lh   = font:getHeight() + 2
     love.graphics.setColor(0.40, 0.85, 0.65)   -- jade green
-    love.graphics.print(name, math.floor((W - text_w) / 2), 10)
+    love.graphics.print(name,    math.floor((W - font:getWidth(name))    / 2), 10)
+    love.graphics.print(hp_line, math.floor((W - font:getWidth(hp_line)) / 2), 10 + lh)
+end
+
+-- ── Active-flag sidebar ───────────────────────────────────────────────────
+-- Right side, 25% from top, dark red, one line per active non-default flag.
+-- Always visible regardless of F3 so you never forget what's enabled.
+
+local function draw_active_flags()
+    -- Each entry: { hotkey, label }. Only shown when the flag is active.
+    local active = {}
+    if instamine                    then active[#active+1] = { "X", "instamine" } end
+    if not Renderer.get_occlusion() then active[#active+1] = { "O", "occl:off"  } end
+    if show_hud                     then active[#active+1] = { "H", "hud"       } end
+    if show_jade                    then active[#active+1] = { "J", "jade"      } end
+
+    if #active == 0 then return end
+
+    local W, H  = love.graphics.getDimensions()
+    local font  = love.graphics.getFont()
+    local lh    = font:getHeight() + 3
+    local y     = H * 0.25
+
+    love.graphics.setColor(0.65, 0.12, 0.12)
+    for _, entry in ipairs(active) do
+        local key, label = entry[1], entry[2]
+        local line = key .. "  " .. label
+        local tw   = font:getWidth(line)
+        love.graphics.print(line, W - tw - 10, y)
+        y = y + lh
+    end
 end
 
 -- ── Public draw (call last in GameLoop.draw) ──────────────────────────────
@@ -90,7 +140,9 @@ function Debug.draw(world, cam, cam_layer, sea_level)
     end
 
     -- Jade HUD is independent: toggled separately with J, not masked by F3.
-    if show_jade then draw_jade() end
+    if show_jade then draw_jade(world) end
+
+    draw_active_flags()
 
     love.graphics.setColor(1, 1, 1)
 end

@@ -53,11 +53,12 @@ function World.new()
         WorldgenCfg.sea_level,
         WorldgenCfg.island.beach_radius)
     return setmetatable({
-        _columns  = {},   -- key → ChunkColumn
-        _count    = 0,
-        game_time = 0,    -- game minutes elapsed (1 real second = 1 game minute)
-        _is_ocean = is_ocean,
-        _is_beach = is_beach,  -- O(1) lookup; replaces Worldgen.is_beach noise scan
+        _columns    = {},   -- key → ChunkColumn
+        _count      = 0,
+        game_time   = 0,    -- game minutes elapsed (1 real second = 1 game minute)
+        _is_ocean   = is_ocean,
+        _is_beach   = is_beach,  -- O(1) lookup; replaces Worldgen.is_beach noise scan
+        tile_damage = {},   -- sparse [q][r][layer] = cumulative damage taken
     }, World)
 end
 
@@ -117,6 +118,32 @@ function World:set_tile(q, r, layer, tile_id)
     if out_of_bounds(q, r) then return end
     local col = self:get_column(col_coord_h(q), col_coord_h(r), col_coord_v(layer))
     col:set(local_coord_h(q), local_coord_h(r), local_coord_v(layer), tile_id)
+    -- Clear stale damage when a tile is removed or replaced.
+    if tile_id == 0 then
+        local by_q = self.tile_damage[q]
+        if by_q then
+            local by_r = by_q[r]
+            if by_r then by_r[layer] = nil end
+        end
+    end
+end
+
+-- Accumulate damage on tile (q,r,layer).  Returns current remaining health.
+-- Caller should check result ≤ 0 to trigger a break.
+function World:damage_tile(q, r, layer, amount)
+    local TR      = require("src.world.tile_registry")
+    local tile_id = self:get_tile(q, r, layer)
+    if not tile_id or tile_id == 0 then return 0 end
+    local max_hp = TR.MAX_HEALTH[tile_id] or 0
+    if max_hp == math.huge then return math.huge end  -- indestructible
+
+    local by_q = self.tile_damage[q]
+    if not by_q then by_q = {}; self.tile_damage[q] = by_q end
+    local by_r = by_q[r]
+    if not by_r then by_r = {}; by_q[r] = by_r end
+    by_r[layer] = (by_r[layer] or 0) + amount
+
+    return max_hp - by_r[layer]
 end
 
 -- ── Neighbourhood preloader ───────────────────────────────────────────────

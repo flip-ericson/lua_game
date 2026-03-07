@@ -24,9 +24,7 @@ end
 -- ── Input callbacks ────────────────────────────────────────────────────────
 
 function love.keypressed(key, scancode, isrepeat)
-    if key == "escape" then
-        love.event.quit()
-    end
+    if key == "escape" then love.event.quit() end
     GameLoop.keypressed(key, scancode, isrepeat)
 end
 

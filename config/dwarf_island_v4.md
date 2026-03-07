@@ -452,19 +452,24 @@ Control *how much*, *how often*, and *how many at once* — not the size of the 
 - **Wall collision:** SAT hex-vs-hex. Player hitbox = flat-top regular hexagon, `PLAYER_HEX_R = 24` px circumradius. Checks player's hex + 6 axial neighbours (7 total). 6-axis SAT per solid hex; push along minimum-overlap axis. Exact face alignment — no circle approximation.
 - **Floor detection:** 5-point foot sample (`FOOT_R = 11`). Independent of SAT hitbox.
 
-**3.3 — Layer Visibility** ✅ (overworld canopy done; underground toggle deferred)
-- **Canopy opacity:** `TileRegistry.TRANSPARENT[id]` tiles render at 50% alpha in the vegetation pass. All leaf variants transparent; bush/trunk opaque.
-- **Trunk rendering:** Top face draws if tile above is air or transparent (leaves no longer hide trunk tops). Side faces draw if neighbour is air or transparent.
+**3.3 — Layer Visibility + Hex Selection System** ✅
+- **Canopy opacity:** `TileRegistry.TRANSPARENT[id]` tiles render at 50% alpha in both overworld and underground. All leaf variants transparent; bush/trunk opaque.
+- **Trunk rendering:** Top face draws if tile above is air or transparent. Side faces draw if neighbour is air or transparent (both renderers now match).
+- **Underground renderer:** Now renders all layers from 0 → center_layer (was limited to LAYERS_BELOW=2 slice). Face culling and occlusion handle visible set — same model as overworld cliffs.
+- **Occlusion:** Tile is gray (COL_OCCLUDED) only when all 6 neighbours AND tile above are solid (not transparent). Jade HUD shows "???" for occluded tiles.
+- **Hex selection:** Inline hit-test during painter draw pass (last-writer-wins = painter order). Detects top face (point_in_hex) and 3 visible side faces (point_in_quad). Selection outline injected immediately after tile's own faces so later tiles occlude it naturally. `Renderer.get_hover()` returns (q, r, layer, tile_id). `Renderer.get_hover_occluded()` for jade masking.
 - **Underground auto-toggle:** deferred — implement alongside 3.8 underground lighting.
 
-**3.4 — Mining**
-- Player aims at an adjacent hex (within reach, drawn with a highlight ring).
-- Hold interact → mining progress drains tile's `hardness` value over time.
-- Visual feedback: tile cracks (3-stage damage sprite overlay), screen-space dust particles.
-- Audio: different dig sounds per tile material (dirt thud, stone clank, ore ring).
-- Tool affects speed: bare hands → slow; pickaxe → faster; iron pickaxe → faster still. Tool–material matchups in `config/balance.lua`.
-- On break: tile → air, spawn item drop entity at that location.
-- Player sprite eventually shows the equipped tool visually (Phase 3 can start with a simple flash; full tool-in-hand sprite comes later with combat polish).
+**3.4 — Mining** *(revised plan — see step breakdown)*
+- **Interact key:** LMB primary, ENTER secondary (dev accessibility). Click-to-swing, not hold-to-drain.
+- **Tile health:** Rename `hardness` → `max_health` everywhere. Damage tracking is a sparse table — only populated for tiles that have taken damage. Cleared when tile breaks or fully regenerates.
+- **Tools (alpha set):** Fists (implicit, always equipped in slot 0), stone_pickaxe, stone_shovel, stone_axe. Defined in `config/items.lua` with `damage`, `swing_cooldown`, `category_bonus` table.
+- **Hotbar:** First 10 inventory slots, bottom-center. Scroll or 1–0 to select. Active item shown. Player spawns with stone_pickaxe in slot 1 for testing.
+- **Inventory:** Flat `{ item_id, count }` array on player. Stack sizes in items.lua.
+- **Mining target:** Uses existing hover system + reach constraint (axial distance ≤ 1 from player hex, same layer as wall_layer). Highlighted with a distinct ring colour (not the default white outline).
+- **Item drops:** On break, `world:set_tile(q,r,layer,0)`, spawn drop entity at that position. Drop table in items.lua (tile_id → item_id, count, chance). Float/bob animation, auto-collect on proximity.
+- **Visual feedback (alpha):** 3-stage crack overlay drawn by renderer based on damage/max_health ratio. White arc flash on swing (drawn on the face). Dust particles deferred. Sound deferred. Screen shake deferred.
+- **Tool-in-hand sprite:** Deferred — placeholder is the swing arc flash on the target face.
 
 **3.5 — Building & Placing Tiles**
 - Select a tile from hotbar, aim at a target hex, press place key.
@@ -622,23 +627,124 @@ The proper underground lighting system. Phase 3.8 gives a basic placeholder (dis
 
 ### PHASE 6 — Crafting System
 
+#### Design Philosophy: Component-Based Crafting
+The sweet spot between Minecraft's ease and TerraFirmaCraft's realism. Instead of drawing shapes in a grid, players **refine raw materials at specialized stations**, then **assemble components into finished goods at benches**. Every step feels meaningful without being a chore.
+
+---
+
+#### Tier 1 — Hand Crafting (No Station Required)
+
+**UI:** A panel to the right of the backpack. Two tabs:
+- *"Can Make Now"* — filtered to recipes where the player has all ingredients in inventory.
+- *"All Known Recipes"* — everything learned so far, grayed out if ingredients are missing. (Players start with a base set; more are earned/discovered.)
+
+**Vibe:** Grabbing whatever is around you to survive. Gives just enough tools to reach the first workstation.
+
+**Example recipes (exact list TBD):**
+- Plant Fibers → Twine
+- Sharp Stone + Twine + Stick → Crude Stone Knife
+- Sticks + Twine → Crude Bow
+
+---
+
+#### Tier 2 — Assembly Benches
+
+Instead of a crafting grid, benches have labeled **component slots** (Head, Handle, Binding, Augment). Slot count and labels vary by bench type.
+
+**Basic Workbench** (early game)
+- Combines components into tools, weapons, simple furniture.
+- *Example:* Bronze Blade (from Anvil) + Wooden Hilt + Leather Strip → **Bronze Sword**
+- No Augment slot.
+
+**Masterwork Bench** (late game upgrade)
+- Unlocks late-game recipes.
+- Adds an **Augment slot** — slot in a carved rune, magic gem, or master grip during assembly to add permanent bonus stats to the item.
+
+---
+
+#### Tier 3 — Specialized Workstations
+
+**Blacksmithing (Simplified Metallurgy)**
+
+*Smelter / Bloomery:*
+- Slots: Raw Ore(s) + Fuel (Coal / Charcoal) → Metal Ingots over time.
+- Alloys require mixing ores during smelt: Copper + Tin → Bronze; Iron + Coal → Steel.
+- Higher-tier alloys gated by smelter upgrade (clay bloomery → stone furnace → iron blast furnace).
+
+*Anvil:*
+- Player brings ingots and selects a Blueprint/Mold (not a mini-game).
+- *Examples:* 2 Steel Ingots → Steel Blade; 3 Iron Ingots → Pickaxe Head; 4 Bronze Ingots → Breastplate.
+- Parts produced here go back to the Workbench for final assembly (blade + hilt + binding = sword).
+
+---
+
+**Textiles & Leather**
+
+*Tanning Rack:*
+- Raw Animal Hide + Tannin Liquor (Water + Tree Bark) → Leather (takes 1 in-game day).
+- Leather used in: early armor, weapon grips, bags, water-skins.
+
+*Loom:*
+- Wool or Plant Fibers → Cloth.
+- Cloth used in: mage robes, gambesons (padded armor under plate), capes.
+
+---
+
+**Cooking & Brewing**
+
+*Campfire:* Raw Meat → Cooked Meat. Basic hunger restoration.
+
+*Cooking Pot / Stove:*
+- Multi-ingredient recipes → meals with buffs (e.g., Meat + Potato + Carrot + Herb → Hearty Stew → +max health for the day, faster stamina regen).
+- Buff tier scales with recipe quality and ingredient freshness.
+
+*Brewery (Fermenting Barrel + Still):*
+- Grain/Fruit + Water + Yeast → Ale / Mead / Wine (fermenting time required).
+- Distillation step → Spirits (stronger effects).
+- Dwarves love ale. Ale provides minor buff; excessive drinking applies debuffs.
+
+---
+
+**Alchemy Station**
+
+- Base Liquid (Water / Oil / Alcohol) + Reagent (Herb / Mushroom / Monster Drop) → Potion.
+- Optional *Distiller* upgrade: concentrate potions for stronger effect at higher reagent cost.
+- Reagent combinations are discoverable (experimentation / recipe scroll rewards).
+
+---
+
+**Magic & Enchanting (Enchanter's Altar)**
+
+Intentional, not RNG:
+- Rare materials (pulverized gems, monster souls) → **Runes** (crafted at the Altar).
+- Runes slotted into weapons/armor at the **Masterwork Bench** Augment slot.
+- Rune types give deterministic bonuses: fire damage, lifesteal, durability, mana regen, etc.
+- **God Altars** (separate structure per deity in our pantheon): offerings → divine boons or unique enchantment access. TBD in Phase 10+ (Magic system).
+
+---
+
 **6.1 — Recipe Registry** (`config/recipes.lua`)
-- `Recipe = { output_id, output_count, inputs = { {item_id, count}, ... }, station, skill_req }`
+- `Recipe = { output_id, output_count, inputs = { {item_id, count}, ... }, station, unlocked_by }`
+- `station`: `"hand"` | `"workbench"` | `"masterwork_bench"` | `"anvil"` | `"smelter"` | `"tanning_rack"` | `"loom"` | `"campfire"` | `"cooking_pot"` | `"brewery"` | `"alchemy_station"` | `"enchanting_altar"`
+- `unlocked_by`: `"default"` (start with) | `"scroll:<name>"` | `"discover"` (first time combining those inputs)
 - Loaded at startup, never modified at runtime.
-- Station types: Hand (no station), Workbench, Anvil/Forge, Furnace/Smelter, Alchemy Table, Cooking Pot, Kiln, Enchanting Circle.
 
 **6.2 — Crafting UI**
-- Recipe book: all recipes are visible from the start, but unavailable ones are grayed out.
-- Filter by station and by "craftable now."
-- Hovering a recipe shows: inputs needed, what you have, what's missing.
-- Pressing craft consumes ingredients and produces the item instantly (or queues it for station-based recipes).
+- Hand crafting: panel right of backpack. Two tabs — "Can Make" / "All Known."
+- Station crafting: interact with a placed station → opens that station's recipe subset with its specific slot layout.
+- Ingredients missing are shown in red with a count of how many more are needed.
+- Pressing craft consumes ingredients instantly (hand) or starts a timed job (station).
 
-**6.3 — Station-Based Processing**
-- Furnace / Smelter: fuel slot + ore slot → metal bar over time. Different ores → different smelt times.
-- Cooking Pot: ingredient slots → cooked meal with temporary buff effects (healing, stamina regen, strength, etc.).
-- Kiln: clay → ceramic tiles, bricks.
-- Alchemy Table: reagents → potions, poisons, enchanting materials.
-- All processing times in `config/balance.lua`.
+**6.3 — Station Processing & Time**
+- All processing durations in `config/balance.lua`.
+- Stations run passively (player doesn't need to stand there). Progress shown on interact.
+- Fuel is consumed per-tick while processing. Empty fuel slot → pauses, does not cancel.
+- Output collects in an output slot; player retrieves manually.
+
+**6.4 — Learning / Discovery**
+- Default recipes known at game start: survival basics, campfire, crude tools.
+- New recipes unlocked via: loot (recipe scrolls), NPC teaching, exploration milestones, first-discovery (try combining things at a station → game may reveal the recipe).
+- Recipe book persists per save. Unlocked recipes are permanent.
 
 ---
 
@@ -934,6 +1040,42 @@ Items accepted as "good enough for alpha" with a known root cause. Collect here 
 1. Collision (Phase 3.2) — player stays on valid surface tiles, reducing continuous mid-hex traversal.
 2. PNG sprite transparency — once vegetation tiles use real sprites with alpha, the "clipping behind a tree" case is largely invisible.
 3. Sub-row injection — compute painter row from the sprite *foot* pixel rather than the hex centre (minor improvement, complex to tune).
+
+---
+
+### Inventory Management — Auto-Merge / Auto-Sort
+**Feature:** A button or hotkey that automatically merges all matching item stacks in the backpack (consolidate partials), then optionally sorts items by category or type.
+
+**Why deferred:** Not necessary for alpha gameplay. The insert-shift drag system is functional enough to manage a small inventory. Auto-sort becomes valuable once the backpack fills with many item types regularly (mid-game+).
+
+---
+
+### Inventory Management — Stack Splitting
+**Feature:** Right-click (or modifier+click) on a stack to split it — take half the stack, or pick a single item off the top.
+
+**Why deferred:** Not necessary for alpha, but significantly improves gameplay once crafting and trading are live. Precise stack control becomes essential when recipes require exact amounts.
+
+---
+
+### Player Obscured by Solid Tiles
+**Symptom:** When the player digs downward and stands inside a hole, solid tiles above render on top of the player sprite, making the character invisible and disorienting.
+
+**Option A — Transparency:** Detect that the player's hex column has solid tiles above `cam_layer` and render those tiles at a low alpha (e.g. 20–30%) so the player remains visible. Scope: renderer needs a per-column "player above?" flag injected before the draw pass.
+
+**Option B — Auto-switch to underground mode:** If the tile directly above the player (player.layer + 1 or +2) is solid, force underground renderer. The underground mode already clips everything above `cam_layer`, so the player is always visible. Note: this is roughly what "Underground auto-toggle" refers to in 3.3.
+
+**Collision loss in holes:** Related — when the player is obscured inside a hole, the surrounding solid tiles may not be in the loaded/rendered set, causing SAT wall collision to fail (no tile to collide against). Fix: ensure preload_near always covers at least the player's immediate 7-hex ring regardless of render culling.
+
+**Why deferred:** Needs a clean design decision (transparency vs. mode-switch) and the underground lighting system (Phase 3.8) will inform the right approach.
+
+---
+
+### Underground Mode — Staircase Layer Offset
+**Issue:** In underground mode `cam_layer` is set to `player.layer + 1` (the wall layer). When the player tries to staircase upward through excavated passages, the camera layer barely leads them — the roof of the passage is at `player.layer + 1` which is exactly the render cutoff, making upward navigation feel cramped and the passage appear to close off above the player.
+
+**Proposed fix:** Use `cam_layer = player.layer + 2` in underground mode, giving one extra layer of headroom above the player. The existing overworld mode would remain at `player.layer + 1`.
+
+**Why deferred:** Minor UX issue. Revisit when underground traversal becomes a regular gameplay loop (Phase 3.8 / 4.x).
 
 ---
 

@@ -155,7 +155,7 @@ return {
     -- Per-species tree geometry.  The tree-placement pass picks the species
     -- from the biome.plants table, then reads dimensions from here.
     trees = {
-        oak    = { trunk = "trunk",        leaves = "leaves",
+        oak    = { trunk = "oak_trunk",     leaves = "oak_leaves",
                    height_min = 3, height_max = 7,  canopy_min = 2, canopy_max = 4 },
         birch  = { trunk = "birch_trunk",  leaves = "birch_leaves",
                    height_min = 4, height_max = 8,  canopy_min = 1, canopy_max = 3 },

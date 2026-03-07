@@ -1,19 +1,29 @@
 # Dwarf Island V4 — Keybinds
 
-## Camera — Movement
+## Player Movement
 | Key | Action |
 |-----|--------|
-| `W` / `↑` | Pan camera up |
-| `S` / `↓` | Pan camera down |
-| `A` / `←` | Pan camera left |
-| `D` / `→` | Pan camera right |
+| `W` / `A` / `S` / `D` | Move player |
+| `Space` | Jump |
+
+## Hotbar
+| Key | Action |
+|-----|--------|
+| `1` – `9` | Select hotbar slot 1–9 |
+| `0` | Select hotbar slot 10 |
+| `Scroll wheel` | Cycle hotbar slot (up = prev, down = next, wraps) |
+
+## Inventory
+| Key | Action |
+|-----|--------|
+| `I` | Open / close backpack (12×12 grid, slots 11–154) |
+| `Esc` | Quit game |
 
 ## Camera — Zoom
 | Key | Action |
 |-----|--------|
 | `=` / `+` | Zoom in |
 | `-` | Zoom out |
-| Scroll wheel | Zoom in / out (smooth) |
 
 ## Camera — Layer (Vertical)
 | Key | Action |
@@ -31,23 +41,20 @@
 | `O` | Toggle occlusion culling on/off |
 | `M` | Toggle world overview (zoom to fit entire island) — overworld mode only |
 
-## UI
+## UI / Debug
 | Key | Action |
 |-----|--------|
-| `J` | Toggle jade HUD (tile name under cursor, top-center) |
-
-## Debug Overlays
-| Key | Action |
-|-----|--------|
+| `J` | Toggle jade HUD (tile name + HP under cursor, top-center) |
+| `X` | Toggle instamine — LMB instantly breaks hovered tile and spawns its drops |
 | `F3` | Toggle all debug overlays (master switch) |
-| `F1` | Toggle HUD (FPS, layer, depth, hover coords, render mode) |
+| `H` | Toggle HUD (FPS, layer, depth, hover coords, render mode) |
 
 ---
 
 ## HUD Reference
-The HUD bar at the bottom of the screen shows:
+The HUD bar at the top of the screen shows:
 ```
-FPS:60  |  overworld  |  layer 768 (sea)  |  (12,-4)  |  occl:on  |  Tab  PgUp/Dn  Home  O  F1  F3
+FPS:60  |  overworld  |  layer 768 (sea)  |  (12,-4)  |  occl:on  |  Tab  PgUp/Dn  Home  O  X  H  F3
 ```
 - **mode** — `overworld` or `underground`
 - **layer N (tag)** — current camera layer; tag is depth below sea (`↓`), above sea (`↑`), or `sea`
