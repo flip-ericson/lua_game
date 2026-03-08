@@ -33,8 +33,9 @@ local _saved_zoom   -- zoom level saved when entering overview (M key)
 
 local CAM_LERP = 8  -- camera follow speed (higher = snappier; 8 = smooth but responsive)
 
-local swing_cooldown = 0   -- seconds remaining until next swing is allowed
+local swing_cooldown  = 0   -- seconds remaining until next swing is allowed
 local FISTS_ID              -- set in GameLoop.load() after ItemRegistry is ready
+local id_rye_planted        -- set in GameLoop.load(); needed in mousepressed
 
 -- Search for a valid spawn point: a grass tile with air directly above.
 -- Picks random hexes within the world boundary and retries up to max_attempts.
@@ -88,8 +89,73 @@ function GameLoop.load()
         -- Dry out after one game day if still wet (defensive: tile may have been mined).
         if w:get_tile(q, r, layer) == id_wet then
             w:set_tile(q, r, layer, id_dry)
+            -- If there's a crop above, double its remaining growth time (drying penalty).
+            local above_tid = w:get_tile(q, r, layer + 1)
+            if above_tid and TileRegistry.IS_CROP[above_tid] then
+                local crop_tick = w:get_tile_tick(q, r, layer + 1)
+                if crop_tick then
+                    local remaining = crop_tick - w.game_time
+                    if remaining > 0 then
+                        w:deregister_tile_tick(q, r, layer + 1)
+                        w:register_tile_tick(q, r, layer + 1, w.game_time + remaining * 2)
+                    end
+                end
+            end
         end
     end)
+
+    -- ── Rye crop tick handlers ─────────────────────────────────────────────
+    -- 1 game day = 1440 game-minutes (1 real second = 1 game minute).
+    id_rye_planted            = TileRegistry.id("rye_planted")
+    local id_rye_seedling     = TileRegistry.id("rye_seedling")
+    local id_rye_immature     = TileRegistry.id("rye_immature")
+    local id_rye_mature       = TileRegistry.id("rye_mature")
+
+    local RYE_DELAY = {              -- base grow time (minutes) for each phase
+        [id_rye_planted]  = 30,     -- DEBUG: 30 min (was 2880)
+        [id_rye_seedling] = 30,     -- DEBUG: 30 min (was 7200)
+        [id_rye_immature] = 30,     -- DEBUG: 30 min (was 10080)
+    }
+    local RYE_NEXT = {
+        [id_rye_planted]  = id_rye_seedling,
+        [id_rye_seedling] = id_rye_immature,
+        [id_rye_immature] = id_rye_mature,
+    }
+
+    local function rye_tick(w, q, r, layer)
+        local tid = w:get_tile(q, r, layer)
+        if not TileRegistry.IS_CROP[tid] then return end  -- tile removed/replaced
+
+        local season = Time.season(w.game_time)
+        -- Winter dormancy: revert all phases to planted; re-check in 1–3 days.
+        if season == "Stoneviel" then
+            w:set_tile(q, r, layer, id_rye_planted)
+            w:register_tile_tick(q, r, layer, w.game_time + 30)  -- DEBUG (was 1440–4320)
+            return
+        end
+
+        -- Advance to next phase.
+        local next_id = RYE_NEXT[tid]
+        if not next_id then return end  -- rye_mature: harvest manually, no further tick
+
+        w:set_tile(q, r, layer, next_id)
+
+        -- Schedule next growth tick unless we just reached mature.
+        -- Check farmland NOW (start of new phase) to set the initial delay.
+        -- Mid-phase changes are handled by events: wet→dry doubles, dry→wet halves.
+        local base = RYE_DELAY[next_id]
+        if base then
+            local delay    = base  -- DEBUG: no variance (was base ± 1440)
+            local farmland = w:get_tile(q, r, layer - 1)
+            if farmland == id_dry then delay = delay * 2 end
+            w:register_tile_tick(q, r, layer, w.game_time + delay)
+        end
+    end
+
+    World.register_tick_handler(id_rye_planted,  rye_tick)
+    World.register_tick_handler(id_rye_seedling, rye_tick)
+    World.register_tick_handler(id_rye_immature, rye_tick)
+
     Time.load()
     Player.load()
 
@@ -131,6 +197,8 @@ function GameLoop.load()
     player.inventory[4] = tool_slot("crude_chisel")
     player.inventory[5] = tool_slot("diamond_hoe")
     player.inventory[6] = tool_slot("watering_can")
+    player.inventory[7] = { item_id = ItemRegistry.id("rye_seed"),  count = 10 }
+    player.inventory[8] = { item_id = ItemRegistry.id("rye_grain"), count = 10 }
 
     -- Unlock default recipes.
     for _, recipe in ipairs(Recipes) do
@@ -205,12 +273,15 @@ local function break_tile(q, r, layer)
     if def and def.drops then
         local bx, by = Hex.hex_to_pixel(q, r)
         for _, entry in ipairs(def.drops) do
-            local item_name, min_c, max_c = entry[1], entry[2], entry[3]
-            local count = (min_c == max_c) and min_c or math.random(min_c, max_c)
-            if count > 0 then
-                local item_id = ItemRegistry.id(item_name)
-                if item_id then
-                    ItemDrops.spawn(item_id, count, bx, by, layer)
+            local item_name, min_c, max_c, chance = entry[1], entry[2], entry[3], entry[4]
+            -- Optional 4th field: chance (0..1). Absent = 1.0 (always drops).
+            if not chance or math.random() < chance then
+                local count = (min_c == max_c) and min_c or math.random(min_c, max_c)
+                if count > 0 then
+                    local item_id = ItemRegistry.id(item_name)
+                    if item_id then
+                        ItemDrops.spawn(item_id, count, bx, by, layer)
+                    end
                 end
             end
         end
@@ -397,20 +468,69 @@ function GameLoop.mousepressed(x, y, button, istouch, presses)
                     end
                 end
             end
+        elseif held_id and held_id == ItemRegistry.id("rye_seed") then
+            -- Rye planting: RMB top face of any farmland → place rye_planted above it.
+            local hq, hr, hl, htid = Renderer.get_hover()
+            local face = Renderer.get_hover_face()
+            if hq and face == 0 and htid and Renderer.get_hover_in_reach() then
+                local is_farmland = (htid == TileRegistry.id("wet_tilled_soil")
+                                  or htid == TileRegistry.id("dry_tilled_soil"))
+                if is_farmland and world:get_tile(hq, hr, hl + 1) == 0 then
+                    world:set_tile(hq, hr, hl + 1, id_rye_planted)
+                    -- Schedule first tick.
+                    -- Stoneviel (winter): skip straight to a spring-check timer.
+                    -- Growing season: normal 2-day base ±1; 2× if dry farmland.
+                    local delay
+                    if Time.season(world.game_time) == "Stoneviel" then
+                        delay = 30   -- DEBUG (was 1440–4320)
+                    else
+                        delay = 30   -- DEBUG (was 2880 ± 1440)
+                        if htid == TileRegistry.id("dry_tilled_soil") then
+                            delay = delay * 2
+                        end
+                    end
+                    world:register_tile_tick(hq, hr, hl + 1, world.game_time + delay)
+                    slot.count = slot.count - 1
+                    if slot.count <= 0 then
+                        slot.item_id = 0
+                        slot.count   = 0
+                    end
+                end
+            end
         elseif held_id and ItemRegistry.TOOL_CLASS[held_id] == "watering_can" then
             -- Watering can:
             --   RMB on liquid tile  → refill to max water.
-            --   RMB on other tile   → splash + deplete water by 1 (only when water > 0).
+            --   RMB on crop tile    → water farmland below + halve remaining crop tick.
+            --   RMB on dry farmland → wet it; schedule drying after 1 game day.
+            --   RMB elsewhere       → cosmetic splash only.
             local hq, hr, hl, htid = Renderer.get_hover()
             if hq and htid and Renderer.get_hover_in_reach() then
                 if htid == TileRegistry.id("salt_water") then
                     slot.water = ItemRegistry.MAX_WATER[held_id]
                 elseif slot.water and slot.water > 0 then
                     Effects.splash(hq, hr, hl)
-                    -- Water dry farmland → wet farmland; schedule drying after 1 game day.
-                    if htid == TileRegistry.id("dry_tilled_soil") then
+                    if TileRegistry.IS_CROP[htid] then
+                        -- Water the farmland one layer below the crop.
+                        local fl  = hl - 1
+                        local ftid = world:get_tile(hq, hr, fl)
+                        if ftid == TileRegistry.id("dry_tilled_soil") then
+                            world:set_tile(hq, hr, fl, TileRegistry.id("wet_tilled_soil"))
+                            world:deregister_tile_tick(hq, hr, fl)
+                            world:register_tile_tick(hq, hr, fl, world.game_time + math.random(1080, 1800))
+                            -- Halve the crop's remaining growth time.
+                            local crop_tick = world:get_tile_tick(hq, hr, hl)
+                            if crop_tick then
+                                local remaining = crop_tick - world.game_time
+                                if remaining > 0 then
+                                    world:deregister_tile_tick(hq, hr, hl)
+                                    world:register_tile_tick(hq, hr, hl, world.game_time + remaining * 0.5)
+                                end
+                            end
+                        end
+                    elseif htid == TileRegistry.id("dry_tilled_soil") then
+                        -- Water dry farmland → wet farmland; schedule drying after 1 game day.
                         world:set_tile(hq, hr, hl, TileRegistry.id("wet_tilled_soil"))
-                        world:deregister_tile_tick(hq, hr, hl)   -- reset clock if re-watered
+                        world:deregister_tile_tick(hq, hr, hl)
                         world:register_tile_tick(hq, hr, hl, world.game_time + math.random(1080, 1800))
                     end
                     slot.water = slot.water - 1

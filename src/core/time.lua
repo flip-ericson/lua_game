@@ -129,6 +129,22 @@ function Time.get(world)
     }
 end
 
+-- Stateless season lookup — no world object needed; safe to call from tick handlers.
+-- Returns the season string for a given game_time value.
+function Time.season(game_time)
+    local total_mins  = math.floor(game_time)
+    local total_days  = math.floor(total_mins / (24 * 60))
+    local day_of_year = total_days % YEAR_DAYS
+    local month_idx   = 1
+    for i = #MONTHS, 1, -1 do
+        if day_of_year >= MONTH_OFFSETS[i] then
+            month_idx = i
+            break
+        end
+    end
+    return MONTHS[month_idx].season
+end
+
 -- ── Helpers ───────────────────────────────────────────────────────────────
 
 -- ordinal(n) → "1st", "2nd", "3rd", "4th", "11th", "21st", etc.

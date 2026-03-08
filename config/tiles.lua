@@ -20,10 +20,19 @@
 --                       False ≠ solid — salt_water is transparent but not solid.
 --   luminous    number  Light radius emitted in tiles (0 = dark).
 --   liquid      bool    Participates in water / lava flow physics.
---   drops       table   Array of { item_name, min_count, max_count }.
+--   drops       table   Array of { item_name, min_count, max_count [, chance] }.
 --                       Empty table = no drops. Count is a random roll each break.
+--                       chance (optional, 0..1): probability the entry fires at all.
+--                       Absent or 1 = always drops.
 --   color       table   {r,g,b} placeholder top-face color (Phase 1 renderer).
 --   color_side  table   {r,g,b} optional override; auto-darkened from color if absent.
+--   sprite_only bool    Skip hex polygon + side faces entirely; render only sprite_top
+--                       centered on the top face. Used for crop tiles. Hex hit-test
+--                       and selection outline are unaffected.
+--   is_crop     bool    Marks tile as a crop. TileRegistry.IS_CROP flat array.
+--                       Farmland speed-adjustment checks only fire for crop tiles.
+--   grows_in    table   Array of season name strings where this crop advances normally.
+--                       Any season NOT in this list triggers winter dormancy handling.
 --
 -- RULES
 --   • IDs must be dense (no gaps) starting at 0.
@@ -279,7 +288,7 @@ return {
         id = 30, name = "tall_grass", category = "organic",
         solid = false, max_health = 1,    transparent = true,
         luminous = 0,  liquid = false,
-        drops = { {"grass", 1, 3} },
+        drops = { {"grass", 1, 3}, {"rye_seed", 1, 5, 0.1} },
         color = { 0.22, 0.50, 0.14 },   -- darker/shadier than oak leaves (0.28, 0.58, 0.18)
     },
 
@@ -303,6 +312,56 @@ return {
         color      = { 0.42, 0.27, 0.14 },   -- slightly darker than dirt (0.48, 0.33, 0.18)
         color_side = { 0.38, 0.24, 0.12 },
         sprite_top   = "assests/tiles/t_wet_farmland.png",
+    },
+
+    -- ── Rye crop — four growth phases ─────────────────────────────────────
+    -- All phases: sprite_only (no hex polygon or side faces), is_crop=true,
+    -- non-solid, max_health=2 (forgiving to misclick), transparent=true.
+    -- grows_in lists the three non-winter seasons; Stoneviel triggers dormancy.
+    -- Shared sprites for phases 1-2 (generic seed/sprout), rye-specific for 3-4.
+    {
+        id = 33, name = "rye_planted",  category = "organic",
+        solid = false, max_health = 2, transparent = true,
+        luminous = 0,  liquid = false,
+        drops      = { {"rye_seed", 1, 1} },
+        color      = { 0.55, 0.42, 0.18 },
+        sprite_top = "assests/entities/entity_planted_seed.png",
+        sprite_only = true,
+        is_crop     = true,
+        grows_in    = { "Ironsong", "Hammerheight", "Brightforge" },
+    },
+    {
+        id = 34, name = "rye_seedling", category = "organic",
+        solid = false, max_health = 2, transparent = true,
+        luminous = 0,  liquid = false,
+        drops      = { {"rye_seed", 1, 1} },
+        color      = { 0.40, 0.62, 0.22 },
+        sprite_top = "assests/entities/entity_sprouted_seed.png",
+        sprite_only = true,
+        is_crop     = true,
+        grows_in    = { "Ironsong", "Hammerheight", "Brightforge" },
+    },
+    {
+        id = 35, name = "rye_immature", category = "organic",
+        solid = false, max_health = 2, transparent = true,
+        luminous = 0,  liquid = false,
+        drops      = { {"rye_seed", 1, 1} },
+        color      = { 0.52, 0.68, 0.24 },
+        sprite_top = "assests/entities/entity_immature_rye.png",
+        sprite_only = true,
+        is_crop     = true,
+        grows_in    = { "Ironsong", "Hammerheight", "Brightforge" },
+    },
+    {
+        id = 36, name = "rye_mature",   category = "organic",
+        solid = false, max_health = 2, transparent = true,
+        luminous = 0,  liquid = false,
+        drops      = { {"rye_grain", 3, 5}, {"rye_seed", 2, 6} },
+        color      = { 0.82, 0.70, 0.28 },
+        sprite_top = "assests/entities/entity_grown_rye.png",
+        sprite_only = true,
+        is_crop     = true,
+        grows_in    = { "Ironsong", "Hammerheight", "Brightforge" },
     },
 
     -- ── Add new tiles below this line. Never renumber above. ─────────────

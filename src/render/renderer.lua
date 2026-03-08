@@ -317,7 +317,8 @@ local function draw_tiles(world, cam, cam_layer, player)
 
                 -- Solid tiles show faces against air OR transparent neighbours.
                 -- Transparent tiles only show faces against air (suppress leaf-on-leaf, etc.).
-                local src_tr   = TR[tid]
+                local src_tr      = TR[tid]
+                local is_spr_only = TileRegistry.SPRITE_ONLY[tid]
                 local show_se  = n_se  == 0 or (not src_tr and TR[n_se])
                 local show_s   = n_s   == 0 or (not src_tr and TR[n_s])
                 local show_sw  = n_sw  == 0 or (not src_tr and TR[n_sw])
@@ -327,48 +328,53 @@ local function draw_tiles(world, cam, cam_layer, player)
                               or (not is_ow and layer == cam_layer)
 
                 -- ── Side faces ────────────────────────────────────────────
-                local sc = TileRegistry.COLOR_SIDE[tid]
-                love.graphics.setColor(sc[1], sc[2], sc[3], alpha)
-
-                if show_se then
+                -- Sprite-only tiles skip drawing but still need hit-tests.
+                if not is_spr_only then
+                    local sc = TileRegistry.COLOR_SIDE[tid]
                     love.graphics.setColor(sc[1], sc[2], sc[3], alpha)
-                    draw_side(v[1], v[2], v[3], v[4])
-                    local sprSE = TileRegistry.SPRITE_SE[tid]
-                    if sprSE then
-                        -- SE bounding box top-left: x = SE vertex (v[3]), y = E vertex (v[2]).
-                        -- Sprite was pre-baked at exact FACE_W × CANVAS_H — draw 1:1.
-                        love.graphics.setColor(1, 1, 1, alpha)
-                        love.graphics.draw(sprSE, v[3], v[2])
+
+                    if show_se then
+                        love.graphics.setColor(sc[1], sc[2], sc[3], alpha)
+                        draw_side(v[1], v[2], v[3], v[4])
+                        local sprSE = TileRegistry.SPRITE_SE[tid]
+                        if sprSE then
+                            love.graphics.setColor(1, 1, 1, alpha)
+                            love.graphics.draw(sprSE, v[3], v[2])
+                        end
                     end
+                    if show_s then
+                        love.graphics.setColor(sc[1], sc[2], sc[3], alpha)
+                        draw_side(v[3], v[4], v[5], v[6])
+                        local sprS = TileRegistry.SPRITE_SOUTH[tid]
+                        if sprS then
+                            local iw, ih = sprS:getDimensions()
+                            love.graphics.setColor(1, 1, 1, alpha)
+                            love.graphics.draw(sprS, v[5], v[6], 0, Hex.SIZE / iw, LAYER_HEIGHT / ih)
+                        end
+                    end
+                    if show_sw then
+                        love.graphics.setColor(sc[1], sc[2], sc[3], alpha)
+                        draw_side(v[5], v[6], v[7], v[8])
+                        local sprSW = TileRegistry.SPRITE_SW[tid]
+                        if sprSW then
+                            love.graphics.setColor(1, 1, 1, alpha)
+                            love.graphics.draw(sprSW, v[7], v[8])
+                        end
+                    end
+                end  -- not is_spr_only
+
+                -- Hit-tests run for all tiles (including sprite-only).
+                if show_se then
                     if point_in_quad(wx,wy, v[1],v[2], v[3],v[4], v[3],v[4]+LAYER_HEIGHT, v[1],v[2]+LAYER_HEIGHT) then
                         nq, nr, nl, ntid = q, r, layer, tid; n_occluded = false; n_face = 1
                     end
                 end
                 if show_s then
-                    love.graphics.setColor(sc[1], sc[2], sc[3], alpha)
-                    draw_side(v[3], v[4], v[5], v[6])
-                    local sprS = TileRegistry.SPRITE_SOUTH[tid]
-                    if sprS then
-                        -- S face is a perfect rectangle: width=Hex.SIZE, height=LAYER_HEIGHT.
-                        -- Top-left corner is the SW vertex (v[5], v[6]).
-                        local iw, ih = sprS:getDimensions()
-                        love.graphics.setColor(1, 1, 1, alpha)
-                        love.graphics.draw(sprS, v[5], v[6], 0, Hex.SIZE / iw, LAYER_HEIGHT / ih)
-                    end
                     if point_in_quad(wx,wy, v[3],v[4], v[5],v[6], v[5],v[6]+LAYER_HEIGHT, v[3],v[4]+LAYER_HEIGHT) then
                         nq, nr, nl, ntid = q, r, layer, tid; n_occluded = false; n_face = 2
                     end
                 end
                 if show_sw then
-                    love.graphics.setColor(sc[1], sc[2], sc[3], alpha)
-                    draw_side(v[5], v[6], v[7], v[8])
-                    local sprSW = TileRegistry.SPRITE_SW[tid]
-                    if sprSW then
-                        -- SW bounding box top-left: W vertex (v[7], v[8]).
-                        -- Sprite was pre-baked at exact FACE_W × CANVAS_H — draw 1:1.
-                        love.graphics.setColor(1, 1, 1, alpha)
-                        love.graphics.draw(sprSW, v[7], v[8])
-                    end
                     if point_in_quad(wx,wy, v[5],v[6], v[7],v[8], v[7],v[8]+LAYER_HEIGHT, v[5],v[6]+LAYER_HEIGHT) then
                         nq, nr, nl, ntid = q, r, layer, tid; n_occluded = false; n_face = 3
                     end
@@ -376,44 +382,60 @@ local function draw_tiles(world, cam, cam_layer, player)
 
                 -- ── Top face ──────────────────────────────────────────────
                 if show_top then
-                    local draw_tc = TileRegistry.COLOR[tid]
-                    -- Underground only: fully-buried tiles at cam_layer drawn gray.
-                    if not is_ow and occlusion_enabled and layer == cam_layer then
-                        local ob1 = world:get_tile(q+1, r,   layer) or 0
-                        local ob2 = world:get_tile(q-1, r,   layer) or 0
-                        local ob3 = world:get_tile(q,   r+1, layer) or 0
-                        local ob4 = world:get_tile(q,   r-1, layer) or 0
-                        local ob5 = world:get_tile(q+1, r-1, layer) or 0
-                        local ob6 = world:get_tile(q-1, r+1, layer) or 0
-                        local ob7 = world:get_tile(q,   r,   layer+1) or 0
-                        if ob1~=0 and not TR[ob1] and ob2~=0 and not TR[ob2]
-                        and ob3~=0 and not TR[ob3] and ob4~=0 and not TR[ob4]
-                        and ob5~=0 and not TR[ob5] and ob6~=0 and not TR[ob6]
-                        and ob7~=0 and not TR[ob7] then
-                            draw_tc = COL_OCCLUDED
+                    local was_occluded = false
+                    if is_spr_only then
+                        -- Sprite-only tile (crops etc.): skip hex polygon; draw sprite only.
+                        -- Always opaque (transparent flag is set only for canopy culling, not alpha).
+                        local spr = TileRegistry.SPRITE_TOP[tid]
+                        if spr then
+                            local iw, ih = spr:getDimensions()
+                            local cx = px + sdx
+                            local cy = py - (layer - 1) * LAYER_HEIGHT
+                            local s = Hex.SIZE / iw
+                            love.graphics.setColor(1, 1, 1, 1)
+                            love.graphics.draw(spr, cx, cy, 0, s, s, iw * 0.5, ih * 0.5)
                         end
-                    end
-                    love.graphics.setColor(draw_tc[1], draw_tc[2], draw_tc[3], alpha)
-                    love.graphics.polygon("fill", v)
+                    else
+                        local draw_tc = TileRegistry.COLOR[tid]
+                        -- Underground only: fully-buried tiles at cam_layer drawn gray.
+                        if not is_ow and occlusion_enabled and layer == cam_layer then
+                            local ob1 = world:get_tile(q+1, r,   layer) or 0
+                            local ob2 = world:get_tile(q-1, r,   layer) or 0
+                            local ob3 = world:get_tile(q,   r+1, layer) or 0
+                            local ob4 = world:get_tile(q,   r-1, layer) or 0
+                            local ob5 = world:get_tile(q+1, r-1, layer) or 0
+                            local ob6 = world:get_tile(q-1, r+1, layer) or 0
+                            local ob7 = world:get_tile(q,   r,   layer+1) or 0
+                            if ob1~=0 and not TR[ob1] and ob2~=0 and not TR[ob2]
+                            and ob3~=0 and not TR[ob3] and ob4~=0 and not TR[ob4]
+                            and ob5~=0 and not TR[ob5] and ob6~=0 and not TR[ob6]
+                            and ob7~=0 and not TR[ob7] then
+                                draw_tc = COL_OCCLUDED
+                            end
+                        end
+                        love.graphics.setColor(draw_tc[1], draw_tc[2], draw_tc[3], alpha)
+                        love.graphics.polygon("fill", v)
 
-                    -- Sprite overlay: drawn flush on top of the flat polygon.
-                    -- Scaled to match the hex bounding box (width=2*SIZE, height=SIZE*√3).
-                    local spr = TileRegistry.SPRITE_TOP[tid]
-                    if spr and draw_tc ~= COL_OCCLUDED then
-                        local iw, ih = spr:getDimensions()
-                        local cx = px + sdx
-                        local cy = py - layer * LAYER_HEIGHT
-                        -- Uniform scale: lock to width (2*SIZE) and let height follow the
-                        -- image's own aspect ratio. Avoids squash when the crop isn't exactly
-                        -- the mathematical hex bounding box.
-                        local s = (Hex.SIZE * 2) / iw
-                        love.graphics.setColor(1, 1, 1, alpha)
-                        love.graphics.draw(spr, cx, cy, 0, s, s, iw * 0.5, ih * 0.5)
+                        -- Sprite overlay: drawn flush on top of the flat polygon.
+                        -- Scaled to match the hex bounding box (width=2*SIZE, height=SIZE*√3).
+                        local spr = TileRegistry.SPRITE_TOP[tid]
+                        if spr and draw_tc ~= COL_OCCLUDED then
+                            local iw, ih = spr:getDimensions()
+                            local cx = px + sdx
+                            local cy = py - layer * LAYER_HEIGHT
+                            -- Uniform scale: lock to width (2*SIZE) and let height follow the
+                            -- image's own aspect ratio. Avoids squash when the crop isn't exactly
+                            -- the mathematical hex bounding box.
+                            local s = (Hex.SIZE * 2) / iw
+                            love.graphics.setColor(1, 1, 1, alpha)
+                            love.graphics.draw(spr, cx, cy, 0, s, s, iw * 0.5, ih * 0.5)
+                        end
+                        was_occluded = (draw_tc == COL_OCCLUDED)
                     end
 
                     if point_in_hex(wx, wy, px, py - layer * LAYER_HEIGHT) then
                         nq, nr, nl, ntid = q, r, layer, tid
-                        n_occluded = (draw_tc == COL_OCCLUDED)
+                        n_occluded = was_occluded
                         n_face = 0
                     end
                 end

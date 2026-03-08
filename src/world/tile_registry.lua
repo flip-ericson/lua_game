@@ -14,6 +14,10 @@
 --                                            "liquid"|"organic"
 --   TileRegistry.COLOR[id]        → {r,g,b} placeholder top-face color
 --   TileRegistry.COLOR_SIDE[id]   → {r,g,b} pre-darkened side-face color
+--   TileRegistry.IS_CROP[id]      → bool    true for crop tiles (rye phases etc.)
+--   TileRegistry.SPRITE_ONLY[id]  → bool    skip hex polygon; draw only sprite_top
+--   TileRegistry.GROWS_IN[id]     → set     { SeasonName=true, ... } or nil
+--                                            O(1) season check: GROWS_IN[id][season]
 --
 -- REVERSE CATEGORY LOOKUP
 --   TileRegistry.by_category["ore"]  → array of IDs in that category
@@ -35,6 +39,9 @@ TileRegistry.SPRITE_TOP   = {}   -- [id] = loaded Image, or nil if no top sprite
 TileRegistry.SPRITE_SOUTH = {}   -- [id] = loaded Image for the S (front square) face, or nil
 TileRegistry.SPRITE_SE    = {}   -- [id] = loaded Image for the SE (right parallelogram) face, or nil
 TileRegistry.SPRITE_SW    = {}   -- [id] = loaded Image for the SW (left parallelogram) face, or nil
+TileRegistry.IS_CROP      = {}   -- [id] = bool
+TileRegistry.SPRITE_ONLY  = {}   -- [id] = bool
+TileRegistry.GROWS_IN     = {}   -- [id] = { SeasonName=true, ... } set, or nil
 
 TileRegistry.by_category = {}   -- by_category["stone"] = { 7, 8, 9, 10 }
 
@@ -151,6 +158,14 @@ function TileRegistry.load()
                     TileRegistry.SPRITE_SW[id] = img
                 end
             end
+        end
+
+        TileRegistry.IS_CROP[id]     = def.is_crop     or false
+        TileRegistry.SPRITE_ONLY[id] = def.sprite_only or false
+        if def.grows_in then
+            local set = {}
+            for _, season in ipairs(def.grows_in) do set[season] = true end
+            TileRegistry.GROWS_IN[id] = set
         end
 
         -- Reverse category lookup.

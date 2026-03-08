@@ -93,6 +93,9 @@ Items accepted as "good enough for alpha" with a known root cause. Revisit in a 
 - **Player obscured by solid tiles** — when standing inside a hole, solid tiles above render on top of the player. Two options: (A) render tiles in the player's column above `cam_layer` at low alpha; (B) auto-switch to underground mode when tile above player is solid. Revisit with Phase 3.8 underground lighting.
 - **Collision loss in holes** — when obscured inside a hole, surrounding tiles may fall outside the loaded set, causing SAT wall collision to silently fail. Fix: `preload_near` must always cover the player's immediate 7-hex ring regardless of render culling.
 - **Underground staircase layer offset** — `cam_layer = player.layer + 1` feels cramped when staircasing upward through tunnels; the passage roof lands exactly at the render cutoff. Consider `player.layer + 2` in underground mode for one extra layer of headroom.
+- **Tile break cascade (surface tiles)** — when grass or farmland is mined/destroyed, check the tile directly above; if it is a crop or other surface-dependent tile, destroy it too (no drops from the displaced tile). Generalise later for any tile that requires a specific tile beneath it.
+- **Rye sprite resize** — current sprite scale (`Hex.SIZE / iw`) is a placeholder; tune sprite dimensions once final art is settled.
+- **Revert rye grow times** — debug delays are 30 min flat. Restore: planted→seedling 2 days ±1 (2880 ± 1440), seedling→immature 5 days ±1 (7200 ± 1440), immature→mature 7 days ±1 (10080 ± 1440); restore winter check to `math.random(1440, 4320)`; restore floor `math.max(360, delay)`. All marked `-- DEBUG` in `src/core/gameloop.lua`.
 
 ## Noted Ideas (deferred, not forgotten)
 - Tile gravity (sand/gravel) + structural support simulation (post-Phase 8)

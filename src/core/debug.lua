@@ -100,13 +100,14 @@ local function draw_jade(world)
     local tick_line
     local next_tick = world:get_tile_tick(hq, hr, hl)
     if next_tick then
-        local rem  = math.max(0, math.floor(next_tick - world.game_time))
-        local h    = math.floor(rem / 60)
-        local m    = rem % 60
+        local rem    = math.max(0, math.floor(next_tick - world.game_time))
+        local h      = math.floor(rem / 60)
+        local m      = rem % 60
+        local label  = TileRegistry.IS_CROP[tile_id] and "Grows in" or "Dries in"
         if h > 0 then
-            tick_line = string.format("Dries in %dh %dm", h, m)
+            tick_line = string.format("%s %dh %dm", label, h, m)
         else
-            tick_line = string.format("Dries in %dm", m)
+            tick_line = string.format("%s %dm", label, m)
         end
     end
 

@@ -350,5 +350,18 @@ return {
         tool_class     = "watering_can",
     },
 
+    -- ── Seeds & Crops ─────────────────────────────────────────────────────
+
+    {
+        id = 45, name = "rye_seed",  display_name = "Rye Seed",
+        max_stack = 99, category = "organic", weight = 0.02,
+        sprite = "assests/items/item_seed_rye.png",
+    },
+    {
+        id = 46, name = "rye_grain", display_name = "Rye Grain",
+        max_stack = 99, category = "organic", weight = 0.05,
+        sprite = "assests/items/item_crop_rye.png",
+    },
+
     -- ── Add new items below this line. Never renumber above. ─────────────
 }
