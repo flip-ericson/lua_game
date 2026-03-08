@@ -3,6 +3,7 @@
 local Debug         = require("src.core.debug")
 local Hex           = require("src.core.hex")
 local LoadingScreen = require("src.core.loading_screen")
+local SpriteGen     = require("src.render.sprite_gen")
 local TileRegistry  = require("src.world.tile_registry")
 local ItemRegistry  = require("src.world.item_registry")
 local World         = require("src.world.world")
@@ -18,6 +19,7 @@ local Hotbar        = require("src.ui.hotbar")
 local Inventory     = require("src.ui.inventory")
 local Crafting      = require("src.ui.crafting")
 local Recipes       = require("config.recipes")
+local Time          = require("src.core.time")
 
 local GameLoop = {}
 
@@ -73,9 +75,22 @@ function GameLoop.load()
 
     Hex.SIZE = RenderCfg.hex_size
 
+    -- SpriteGen.run()   -- uncomment to regenerate se_/sw_ sprites from s_*.png sources
     TileRegistry.load()
     ItemRegistry.load()
     FISTS_ID = ItemRegistry.id("fists")
+
+    -- ── Tile tick handlers ────────────────────────────────────────────────
+    -- Registered here after both registries are loaded so IDs are valid.
+    local id_wet  = TileRegistry.id("wet_tilled_soil")
+    local id_dry  = TileRegistry.id("dry_tilled_soil")
+    World.register_tick_handler(id_wet, function(w, q, r, layer)
+        -- Dry out after one game day if still wet (defensive: tile may have been mined).
+        if w:get_tile(q, r, layer) == id_wet then
+            w:set_tile(q, r, layer, id_dry)
+        end
+    end)
+    Time.load()
     Player.load()
 
     -- Show loading screen before blocking worldgen.
@@ -99,20 +114,23 @@ function GameLoop.load()
     player = Player.new(px, py, sl)
 
     -- Starting gear: diamond tools in hotbar slots 1–3.
-    player.inventory[1] = { item_id = ItemRegistry.id("diamond_pickaxe"), count = 1 }
-    player.inventory[2] = { item_id = ItemRegistry.id("diamond_shovel"),  count = 1 }
-    player.inventory[3] = { item_id = ItemRegistry.id("diamond_axe"),     count = 1 }
-
-    -- Test materials so crafting can be exercised immediately.
-    player.inventory[4] = { item_id = ItemRegistry.id("stone_chunk"), count = 5 }
-    player.inventory[5] = { item_id = ItemRegistry.id("stick"),       count = 5 }
-
-    -- Tile placement test: 99 of each placeable tile in hotbar slots 6–10.
-    player.inventory[6]  = { item_id = ItemRegistry.id("dirt_tile"),      count = 99 }
-    player.inventory[7]  = { item_id = ItemRegistry.id("sand_tile"),      count = 99 }
-    player.inventory[8]  = { item_id = ItemRegistry.id("stone_tile"),     count = 99 }
-    player.inventory[9]  = { item_id = ItemRegistry.id("marble_tile"),    count = 99 }
-    player.inventory[10] = { item_id = ItemRegistry.id("grimstone_tile"), count = 99 }
+    local function tool_slot(name)
+        local id  = ItemRegistry.id(name)
+        local dur = ItemRegistry.DURABILITY[id]
+        local mw  = ItemRegistry.MAX_WATER[id]
+        return {
+            item_id    = id,
+            count      = 1,
+            durability = (dur and dur > 0) and dur or nil,
+            water      = (mw  and mw  > 0) and mw  or nil,
+        }
+    end
+    player.inventory[1] = tool_slot("diamond_pickaxe")
+    player.inventory[2] = tool_slot("diamond_shovel")
+    player.inventory[3] = tool_slot("diamond_axe")
+    player.inventory[4] = tool_slot("crude_chisel")
+    player.inventory[5] = tool_slot("diamond_hoe")
+    player.inventory[6] = tool_slot("watering_can")
 
     -- Unlock default recipes.
     for _, recipe in ipairs(Recipes) do
@@ -171,6 +189,7 @@ function GameLoop.draw()
     Hotbar.draw(player)
     Inventory.draw(player)
     Crafting.draw(player)
+    Time.draw(Time.get(world), W, H)
 
     Debug.draw(world, camera, cam_layer, WorldgenCfg.sea_level)
 end
@@ -181,6 +200,7 @@ local function break_tile(q, r, layer)
     local tile_id = world:get_tile(q, r, layer)
     if not tile_id or tile_id == 0 then return end
     local def = TileRegistry.get(tile_id)
+    world:deregister_tile_tick(q, r, layer)   -- clean up any pending tick
     world:set_tile(q, r, layer, 0)
     if def and def.drops then
         local bx, by = Hex.hex_to_pixel(q, r)
@@ -308,6 +328,16 @@ function GameLoop.mousepressed(x, y, button, istouch, presses)
             if hp <= 0 then
                 break_tile(hq, hr, hl)
             end
+
+            -- Decrement tool durability; destroy at 0.
+            if slot and slot.item_id ~= 0 and slot.durability then
+                slot.durability = slot.durability - 1
+                if slot.durability <= 0 then
+                    slot.item_id    = 0
+                    slot.count      = 0
+                    slot.durability = nil
+                end
+            end
         end
     end
 
@@ -321,10 +351,10 @@ function GameLoop.mousepressed(x, y, button, istouch, presses)
             local face = Renderer.get_hover_face()
             if hq and face ~= nil and Renderer.get_hover_in_reach() then
                 local FACE_NBR = {
-                    [0] = { 0,  0,  1 },   -- top  → layer above
-                    [1] = { 1,  0,  0 },   -- E    → east neighbor
-                    [2] = { 0,  1,  0 },   -- SE   → southeast neighbor
-                    [3] = {-1,  1,  0 },   -- SW   → southwest neighbor
+                    [0] = { 0,  0,  1 },   -- top → layer above
+                    [1] = { 1,  0,  0 },   -- SE  → east axial neighbor
+                    [2] = { 0,  1,  0 },   -- S   → southeast axial neighbor
+                    [3] = {-1,  1,  0 },   -- SW  → southwest axial neighbor
                 }
                 local off = FACE_NBR[face]
                 if off then
@@ -341,6 +371,53 @@ function GameLoop.mousepressed(x, y, button, istouch, presses)
                             slot.item_id = 0
                             slot.count   = 0
                         end
+                    end
+                end
+            end
+        elseif held_id and ItemRegistry.TOOL_CLASS[held_id] == "hoe" then
+            -- Hoe tilling: RMB on the top face (face=0) only.
+            --   grass → dirt
+            --   dirt  → dry_tilled_soil
+            local hq, hr, hl, htid = Renderer.get_hover()
+            local face = Renderer.get_hover_face()
+            if hq and face == 0 and htid and Renderer.get_hover_in_reach() then
+                local result_id
+                if htid == TileRegistry.id("grass") then
+                    result_id = TileRegistry.id("dirt")
+                elseif htid == TileRegistry.id("dirt") then
+                    result_id = TileRegistry.id("dry_tilled_soil")
+                end
+                if result_id then
+                    world:set_tile(hq, hr, hl, result_id)
+                    slot.durability = slot.durability - 1
+                    if slot.durability <= 0 then
+                        slot.item_id    = 0
+                        slot.count      = 0
+                        slot.durability = nil
+                    end
+                end
+            end
+        elseif held_id and ItemRegistry.TOOL_CLASS[held_id] == "watering_can" then
+            -- Watering can:
+            --   RMB on liquid tile  → refill to max water.
+            --   RMB on other tile   → splash + deplete water by 1 (only when water > 0).
+            local hq, hr, hl, htid = Renderer.get_hover()
+            if hq and htid and Renderer.get_hover_in_reach() then
+                if htid == TileRegistry.id("salt_water") then
+                    slot.water = ItemRegistry.MAX_WATER[held_id]
+                elseif slot.water and slot.water > 0 then
+                    Effects.splash(hq, hr, hl)
+                    -- Water dry farmland → wet farmland; schedule drying after 1 game day.
+                    if htid == TileRegistry.id("dry_tilled_soil") then
+                        world:set_tile(hq, hr, hl, TileRegistry.id("wet_tilled_soil"))
+                        world:deregister_tile_tick(hq, hr, hl)   -- reset clock if re-watered
+                        world:register_tile_tick(hq, hr, hl, world.game_time + math.random(1080, 1800))
+                    end
+                    slot.water = slot.water - 1
+                    if slot.water <= 0 then
+                        slot.item_id = 0
+                        slot.count   = 0
+                        slot.water   = nil
                     end
                 end
             end

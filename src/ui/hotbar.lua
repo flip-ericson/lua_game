@@ -30,10 +30,42 @@ local CAT_COLOR = {
     organic    = { 0.30, 0.72, 0.26 },
     block      = { 0.52, 0.52, 0.58 },
     tool       = { 0.48, 0.68, 0.88 },
+    component  = { 0.62, 0.52, 0.78 },
 }
 local CAT_COLOR_FALLBACK = { 0.60, 0.60, 0.60 }
 
 -- ── Internal helpers ──────────────────────────────────────────────────────
+
+-- Draw a 1px durability bar along the bottom of a slot.
+-- Only drawn for tools with finite durability (slot.durability ~= nil).
+local function draw_durability_bar(slot, sx, sy)
+    if not slot.durability then return end
+    local max_dur = ItemRegistry.DURABILITY[slot.item_id]
+    if not max_dur or max_dur == math.huge then return end
+
+    local pct = math.max(0, slot.durability / max_dur)
+    local r, g, b
+    if     pct >= 0.75 then r, g, b = 0.20, 0.85, 0.20
+    elseif pct >= 0.50 then r, g, b = 0.95, 0.88, 0.10
+    elseif pct >= 0.25 then r, g, b = 0.95, 0.50, 0.10
+    else                    r, g, b = 0.90, 0.15, 0.15
+    end
+
+    local bar_w = math.max(1, math.floor((SLOT_SIZE - 2) * pct))
+    love.graphics.setColor(r, g, b)
+    love.graphics.rectangle("fill", sx + 1, sy + SLOT_SIZE - 5, bar_w, 2)
+end
+
+-- Draw a blue water bar for tools that use water instead of durability.
+local function draw_water_bar(slot, sx, sy)
+    if not slot.water then return end
+    local max_w = ItemRegistry.MAX_WATER[slot.item_id]
+    if not max_w or max_w == 0 then return end
+    local pct   = math.max(0, slot.water / max_w)
+    local bar_w = math.max(1, math.floor((SLOT_SIZE - 2) * pct))
+    love.graphics.setColor(0.18, 0.52, 0.92)
+    love.graphics.rectangle("fill", sx + 1, sy + SLOT_SIZE - 5, bar_w, 2)
+end
 
 -- Draw item content (sprite or colour swatch) centred inside a slot.
 local function draw_item(id, slot_x, slot_y)
@@ -91,7 +123,7 @@ function Hotbar.draw(player)
         love.graphics.rectangle("line", sx, oy, SLOT_SIZE, SLOT_SIZE, 4, 4)
         love.graphics.setLineWidth(1)
 
-        -- Item sprite / placeholder + stack count badge.
+        -- Item sprite / placeholder + stack count badge + durability bar.
         if slot.item_id ~= 0 then
             draw_item(slot.item_id, sx, oy)
 
@@ -107,6 +139,9 @@ function Hotbar.draw(player)
                 love.graphics.setColor(1, 1, 1)
                 love.graphics.print(cnt, sx + SLOT_SIZE - tw - 3, oy + SLOT_SIZE - 14)
             end
+
+            draw_durability_bar(slot, sx, oy)
+            draw_water_bar(slot, sx, oy)
         end
     end
 

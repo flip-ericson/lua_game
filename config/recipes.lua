@@ -82,5 +82,56 @@ return {
         learned_by_default = true,
     },
 
+    {
+        id           = 8,
+        name         = "crude_twine",
+        display_name = "Crude Twine",
+        station      = "hand",
+        inputs       = { { name = "grass", count = 3 } },
+        output       = { name = "crude_twine", count = 1 },
+        learned_by_default = true,
+    },
+
+    {
+        id           = 9,
+        name         = "crude_chisel",
+        display_name = "Crude Chisel",
+        station      = "hand",
+        inputs       = {
+            { name = "sharp_stone",  count = 1 },
+            { name = "crude_twine",  count = 1 },
+            { name = "stick",        count = 1 },
+        },
+        output       = { name = "crude_chisel", count = 1 },
+        learned_by_default = true,
+    },
+
+    -- ── Component Recipes (tool-durability cost) ──────────────────────────
+
+    {
+        id           = 10,
+        name         = "stone_pickaxe_head",
+        display_name = "Stone Pickaxe Head",
+        station      = "hand",
+        inputs       = { { name = "stone_chunk", count = 1 } },
+        tool_costs   = { { class = "chisel", durability_cost = 1 } },
+        output       = { name = "stone_pickaxe_head", count = 1 },
+        learned_by_default = true,
+    },
+    {
+        id           = 11,
+        name         = "wooden_handle",
+        display_name = "Wooden Handle",
+        station      = "hand",
+        inputs       = {
+            { name = "oak_log", count = 1,
+              accept       = { "oak_log", "palm_log", "spruce_log", "birch_log" },
+              display_name = "Any Log" },
+        },
+        tool_costs   = { { class = "chisel", durability_cost = 1 } },
+        output       = { name = "wooden_handle", count = 1 },
+        learned_by_default = true,
+    },
+
     -- ── Add new recipes below this line. Never renumber above. ────────────
 }

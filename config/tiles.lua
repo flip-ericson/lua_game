@@ -275,5 +275,35 @@ return {
         color = { 0.94, 0.92, 0.86 },
     },
 
+    {
+        id = 30, name = "tall_grass", category = "organic",
+        solid = false, max_health = 1,    transparent = true,
+        luminous = 0,  liquid = false,
+        drops = { {"grass", 1, 3} },
+        color = { 0.22, 0.50, 0.14 },   -- darker/shadier than oak leaves (0.28, 0.58, 0.18)
+    },
+
+    -- ── Farmland ──────────────────────────────────────────────────────────
+    -- dry_tilled_soil: created when a hoe is used on dirt.
+    -- Does not generate naturally. Cannot be walked through (solid).
+    {
+        id = 31, name = "dry_tilled_soil", category = "surface",
+        solid = true,  max_health = 100.0,  transparent = false,
+        luminous = 0,  liquid = false,
+        drops = { {"dirt_clod", 3, 5} },
+        color      = { 0.42, 0.27, 0.14 },   -- slightly darker than dirt (0.48, 0.33, 0.18)
+        color_side = { 0.38, 0.24, 0.12 },
+        sprite_top   = "assests/tiles/t_dry_farmland.png",
+    },
+    {
+        id = 32, name = "wet_tilled_soil", category = "surface",
+        solid = true,  max_health = 100.0,  transparent = false,
+        luminous = 0,  liquid = false,
+        drops = { {"dirt_clod", 3, 5} },
+        color      = { 0.42, 0.27, 0.14 },   -- slightly darker than dirt (0.48, 0.33, 0.18)
+        color_side = { 0.38, 0.24, 0.12 },
+        sprite_top   = "assests/tiles/t_wet_farmland.png",
+    },
+
     -- ── Add new tiles below this line. Never renumber above. ─────────────
 }

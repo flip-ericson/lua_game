@@ -16,6 +16,14 @@ local TileRegistry = require("src.world.tile_registry")
 
 local LAYER_HEIGHT = RenderCfg.layer_height
 
+-- ── Spritesheet row layout (0-indexed) ────────────────────────────────────
+local IDLE_ROW = { south=0, west=1, north=2, east=3 }
+local WALK_ROW = { south=4, west=5, north=6, east=7 }
+local WALK_FPS     = 10     -- walk animation frames per second
+local BLINK_FRAME_T = 0.07  -- seconds per blink phase (3 phases ≈ 0.21 s total)
+-- idle blink col sequence: phase 0=normal, 1=half-close, 2=closed, 3=half-close
+local BLINK_COLS = { 0, 1, 2, 1 }   -- 1-indexed (phase+1)
+
 -- ── Movement ──────────────────────────────────────────────────────────────
 local SPEED       = 200   -- world-pixels / second
 local AIR_CONTROL = 0.0   -- 0 = locked to launch velocity; 1 = full ground control
@@ -58,19 +66,20 @@ local Player = {}
 Player.__index = Player
 
 local spritesheet
-local frame_quad
-local air_quad
+local all_quads = {}   -- [row][col], both 0-indexed; pre-built in Player.load()
 
 -- Call once at startup (before Player.new).
 function Player.load()
     spritesheet = love.graphics.newImage("assests/entities/player_animations.png")
     spritesheet:setFilter("nearest", "nearest")
-    -- Top-left frame (column 0, row 0) = default standing pose.
-    frame_quad = love.graphics.newQuad(0, 0, FRAME_W, FRAME_H,
-                     spritesheet:getDimensions())
-    -- Row 5, column 2 (1-indexed) = row 4, col 1 (0-indexed) = airborne frame.
-    air_quad = love.graphics.newQuad(1 * FRAME_W, 4 * FRAME_H, FRAME_W, FRAME_H,
-                     spritesheet:getDimensions())
+    local sw, sh = spritesheet:getDimensions()
+    for row = 0, 7 do
+        all_quads[row] = {}
+        for col = 0, 9 do
+            all_quads[row][col] = love.graphics.newQuad(
+                col * FRAME_W, row * FRAME_H, FRAME_W, FRAME_H, sw, sh)
+        end
+    end
 end
 
 -- x, y  : world-pixel position (float; NOT snapped to hex centres).
@@ -111,6 +120,16 @@ function Player.new(x, y, layer)
         -- Populated at startup from recipes.lua learned_by_default,
         -- then extended by scrolls / NPC teaching / discovery at runtime.
         known_recipes = {},
+
+        -- ── Animation ─────────────────────────────────────────────────────
+        facing        = "south",  -- "north" | "south" | "east" | "west"
+        anim_frame    = 0,        -- current walk frame index (0–9)
+        anim_t        = 0,        -- walk frame timer accumulator (seconds)
+        blink_phase   = 0,        -- 0=normal, 1=half-close, 2=closed, 3=half-close
+        blink_phase_t = 0,        -- time spent in current blink phase (seconds)
+        blink_timer   = 0,        -- time since last blink ended (seconds)
+        blink_next    = 5,        -- seconds until next blink triggers
+        _moving       = false,    -- true while WASD input is active
     }, Player)
     p.q, p.r = Hex.pixel_to_hex(x, y)
     return p
@@ -213,6 +232,49 @@ local function wall_resolve(world, x, y, wall_layer)
     return x + push_x, y + push_y
 end
 
+-- ── Animation update ───────────────────────────────────────────────────────
+-- Called each frame with the movement intent (dx/dy from raw input, NOT velocity).
+function Player:_update_anim(dt, moving)
+    if moving then
+        -- Advance walk cycle.
+        self.anim_t = self.anim_t + dt
+        local frame_dur = 1 / WALK_FPS
+        while self.anim_t >= frame_dur do
+            self.anim_t     = self.anim_t - frame_dur
+            self.anim_frame = (self.anim_frame + 1) % 10
+        end
+        -- Reset blink state so it restarts cleanly on next idle.
+        self.blink_phase   = 0
+        self.blink_phase_t = 0
+        self.blink_timer   = 0
+    else
+        -- Idle: reset walk frame, advance blink state.
+        self.anim_frame = 0
+        self.anim_t     = 0
+
+        if self.blink_phase == 0 then
+            -- Waiting for next blink.
+            self.blink_timer = self.blink_timer + dt
+            if self.blink_timer >= self.blink_next then
+                self.blink_phase   = 1
+                self.blink_phase_t = 0
+            end
+        else
+            -- Mid-blink: advance through phases 1→2→3→0.
+            self.blink_phase_t = self.blink_phase_t + dt
+            if self.blink_phase_t >= BLINK_FRAME_T then
+                self.blink_phase_t = 0
+                self.blink_phase   = self.blink_phase + 1
+                if self.blink_phase > 3 then
+                    self.blink_phase = 0
+                    self.blink_timer = 0
+                    self.blink_next  = math.random(3, 7)
+                end
+            end
+        end
+    end
+end
+
 -- Called every frame from GameLoop.update(dt).
 function Player:update(dt, world)
     dt = math.min(dt, MAX_DT)
@@ -223,6 +285,17 @@ function Player:update(dt, world)
     if love.keyboard.isDown("s") then dy = dy + 1 end
     if love.keyboard.isDown("a") then dx = dx - 1 end
     if love.keyboard.isDown("d") then dx = dx + 1 end
+
+    -- Update facing from raw input (before diagonal normalization).
+    if dx ~= 0 or dy ~= 0 then
+        if math.abs(dx) >= math.abs(dy) then
+            self.facing = (dx > 0) and "east" or "west"
+        else
+            self.facing = (dy > 0) and "south" or "north"
+        end
+    end
+    self._moving = (dx ~= 0 or dy ~= 0)
+    self:_update_anim(dt, self._moving)
 
     if dx ~= 0 and dy ~= 0 then
         dx = dx * 0.7071
@@ -306,7 +379,20 @@ function Player:draw_world(draw_layer)
     -- Player sprite, elevated by fractional z during jumps/falls.
     local scale_x = RENDER_W / FRAME_W
     local scale_y = RENDER_H / FRAME_H
-    local quad = (self.jumping or self.falling) and air_quad or frame_quad
+
+    -- Select animation quad.
+    local quad
+    if self.jumping or self.falling then
+        -- Airborne: mid-stride frame of the current facing direction.
+        quad = all_quads[WALK_ROW[self.facing]][2]
+    elseif self._moving then
+        quad = all_quads[WALK_ROW[self.facing]][self.anim_frame]
+    else
+        -- Idle: north has only one frame; other directions support blinking.
+        local col = (self.facing == "north") and 0 or BLINK_COLS[self.blink_phase + 1]
+        quad = all_quads[IDLE_ROW[self.facing]][col]
+    end
+
     love.graphics.setColor(1, 1, 1)
     love.graphics.draw(
         spritesheet, quad,

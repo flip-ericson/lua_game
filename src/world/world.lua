@@ -42,8 +42,19 @@ local WORLD_RADIUS  = WorldgenCfg.world_radius  -- hex-distance; boundary is a r
 local MAX_COL_LAYER = math.floor(WORLD_DEPTH / CHUNK_DEPTH) - 1   -- 127
 local MAX_COLUMNS   = 128   -- LRU eviction ceiling
 
+local CHUNK_LAYER_STRIDE = CHUNK_SIZE * CHUNK_SIZE  -- 1024 tiles per local layer slice
+
 local World = {}
 World.__index = World
+
+-- ── Tick handler registry ─────────────────────────────────────────────────
+-- Maps tile_id → function(world, q, r, layer) called when a tick fires.
+-- Register from outside (e.g. gameloop) after TileRegistry is loaded.
+local TICK_HANDLERS = {}
+
+function World.register_tick_handler(tile_id, fn)
+    TICK_HANDLERS[tile_id] = fn
+end
 
 -- ── Constructor ───────────────────────────────────────────────────────────
 
@@ -55,7 +66,7 @@ function World.new()
     return setmetatable({
         _columns    = {},   -- key → ChunkColumn
         _count      = 0,
-        game_time   = 0,    -- game minutes elapsed (1 real second = 1 game minute)
+        game_time   = 25020, -- 9:00 AM, 1st of Mithril, Year 1 (day 17 × 1440 + 9 × 60)
         _is_ocean   = is_ocean,
         _is_beach   = is_beach,  -- O(1) lookup; replaces Worldgen.is_beach noise scan
         tile_damage = {},   -- sparse [q][r][layer] = cumulative damage taken
@@ -69,10 +80,83 @@ local function local_coord_h(v) return v % CHUNK_SIZE               end
 local function col_coord_v(v)   return math.floor(v / CHUNK_DEPTH) end
 local function local_coord_v(v) return v % CHUNK_DEPTH              end
 
+-- Converts world coords → the 1-based local index used by ChunkColumn.
+-- Mirrors chunk.lua's make_idx so world.lua can register/deregister ticks
+-- without exposing the index formula as part of ChunkColumn's public API.
+local function world_to_local_idx(q, r, layer)
+    return local_coord_v(layer) * CHUNK_LAYER_STRIDE
+         + local_coord_h(r)     * CHUNK_SIZE
+         + local_coord_h(q) + 1
+end
+
+-- Hex-distance out-of-bounds check (integer only, no sqrt).
+-- The world boundary is a regular hexagon of radius WORLD_RADIUS.
+local function out_of_bounds(q, r)
+    return math.max(math.abs(q), math.abs(q + r), math.abs(r)) > WORLD_RADIUS
+end
+
 -- ── Game time ─────────────────────────────────────────────────────────────
 
 function World:update(dt)
     self.game_time = self.game_time + dt
+
+    -- ── Tick dispatch ─────────────────────────────────────────────────────
+    -- Only loaded chunks are ticked — unloaded state is frozen until re-loaded.
+    -- tick_list is sorted ascending; bail on first future entry (early-exit, O(1) usually).
+    local gt = self.game_time
+    for _, col in pairs(self._columns) do
+        local list = col.tick_list
+        while list[1] and list[1].next_stage_time <= gt do
+            local entry   = table.remove(list, 1)
+            -- Decode 1-based local idx → world coords.
+            local i       = entry.idx - 1
+            local layer_l = math.floor(i / CHUNK_LAYER_STRIDE)
+            local rem     = i % CHUNK_LAYER_STRIDE
+            local r_l     = math.floor(rem / CHUNK_SIZE)
+            local q_l     = rem % CHUNK_SIZE
+            local wq = col.col_q   * CHUNK_SIZE  + q_l
+            local wr = col.col_r   * CHUNK_SIZE  + r_l
+            local wl = col.col_layer * CHUNK_DEPTH + layer_l
+            local tid     = col:get(q_l, r_l, layer_l)
+            local handler = TICK_HANDLERS[tid]
+            if handler then handler(self, wq, wr, wl) end
+        end
+    end
+end
+
+-- ── Tile tick registration (world-coord wrappers) ─────────────────────────
+
+-- Register a tick for the tile at (q, r, layer) to fire at game-time next_time.
+-- Replaces any existing tick for that tile (call deregister first if re-scheduling).
+function World:register_tile_tick(q, r, layer, next_time)
+    if layer < 0 or layer >= WORLD_DEPTH then return end
+    if out_of_bounds(q, r) then return end
+    local col = self:get_column(col_coord_h(q), col_coord_h(r), col_coord_v(layer))
+    col:register_tick(world_to_local_idx(q, r, layer), next_time)
+end
+
+-- Remove any pending tick for the tile at (q, r, layer).
+-- Safe to call even if no tick is registered (no-op).
+function World:deregister_tile_tick(q, r, layer)
+    if layer < 0 or layer >= WORLD_DEPTH then return end
+    if out_of_bounds(q, r) then return end
+    local col = self:get_column(col_coord_h(q), col_coord_h(r), col_coord_v(layer))
+    col:deregister_tick(world_to_local_idx(q, r, layer))
+end
+
+-- Returns the next_stage_time for the tile at (q, r, layer), or nil if none scheduled.
+-- Uses a direct cache lookup — does NOT trigger chunk generation.
+function World:get_tile_tick(q, r, layer)
+    if layer < 0 or layer >= WORLD_DEPTH then return nil end
+    if out_of_bounds(q, r) then return nil end
+    local key = ChunkColumn.key(col_coord_h(q), col_coord_h(r), col_coord_v(layer))
+    local col = self._columns[key]
+    if not col then return nil end
+    local idx = world_to_local_idx(q, r, layer)
+    for _, entry in ipairs(col.tick_list) do
+        if entry.idx == idx then return entry.next_stage_time end
+    end
+    return nil
 end
 
 -- ── Column cache ──────────────────────────────────────────────────────────
@@ -99,12 +183,6 @@ function World:get_column(col_q, col_r, col_layer)
 end
 
 -- ── get_tile / set_tile ───────────────────────────────────────────────────
-
--- Hex-distance out-of-bounds check (integer only, no sqrt).
--- The world boundary is a regular hexagon of radius WORLD_RADIUS.
-local function out_of_bounds(q, r)
-    return math.max(math.abs(q), math.abs(q + r), math.abs(r)) > WORLD_RADIUS
-end
 
 function World:get_tile(q, r, layer)
     if layer < 0 or layer >= WORLD_DEPTH then return 0 end

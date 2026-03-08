@@ -96,11 +96,28 @@ local function draw_jade(world)
     local cur_str = max_hp == math.huge and "\xe2\x88\x9e" or tostring(math.max(0, math.floor(max_hp - dmg)))
     local hp_line = "HP: " .. cur_str .. " / " .. max_str
 
+    -- Tick line: show remaining time until next state change, if any.
+    local tick_line
+    local next_tick = world:get_tile_tick(hq, hr, hl)
+    if next_tick then
+        local rem  = math.max(0, math.floor(next_tick - world.game_time))
+        local h    = math.floor(rem / 60)
+        local m    = rem % 60
+        if h > 0 then
+            tick_line = string.format("Dries in %dh %dm", h, m)
+        else
+            tick_line = string.format("Dries in %dm", m)
+        end
+    end
+
     local font = love.graphics.getFont()
     local lh   = font:getHeight() + 2
     love.graphics.setColor(0.40, 0.85, 0.65)   -- jade green
     love.graphics.print(name,    math.floor((W - font:getWidth(name))    / 2), 10)
     love.graphics.print(hp_line, math.floor((W - font:getWidth(hp_line)) / 2), 10 + lh)
+    if tick_line then
+        love.graphics.print(tick_line, math.floor((W - font:getWidth(tick_line)) / 2), 10 + lh * 2)
+    end
 end
 
 -- ── Active-flag sidebar ───────────────────────────────────────────────────
@@ -113,7 +130,6 @@ local function draw_active_flags()
     if instamine                    then active[#active+1] = { "X", "instamine" } end
     if not Renderer.get_occlusion() then active[#active+1] = { "O", "occl:off"  } end
     if show_hud                     then active[#active+1] = { "H", "hud"       } end
-    if show_jade                    then active[#active+1] = { "J", "jade"      } end
 
     if #active == 0 then return end
 

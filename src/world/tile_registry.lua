@@ -31,6 +31,10 @@ TileRegistry.LUMINOUS    = {}
 TileRegistry.CATEGORY    = {}
 TileRegistry.COLOR       = {}
 TileRegistry.COLOR_SIDE  = {}
+TileRegistry.SPRITE_TOP   = {}   -- [id] = loaded Image, or nil if no top sprite
+TileRegistry.SPRITE_SOUTH = {}   -- [id] = loaded Image for the S (front square) face, or nil
+TileRegistry.SPRITE_SE    = {}   -- [id] = loaded Image for the SE (right parallelogram) face, or nil
+TileRegistry.SPRITE_SW    = {}   -- [id] = loaded Image for the SW (left parallelogram) face, or nil
 
 TileRegistry.by_category = {}   -- by_category["stone"] = { 7, 8, 9, 10 }
 
@@ -114,6 +118,40 @@ function TileRegistry.load()
         TileRegistry.CATEGORY[id]    = def.category
         TileRegistry.COLOR[id]       = def.color
         TileRegistry.COLOR_SIDE[id]  = def.color_side or darken(def.color)
+
+        if def.sprite_top then
+            assert(love.filesystem.getInfo(def.sprite_top),
+                string.format("tiles.lua '%s': sprite_top file not found: '%s'", def.name, def.sprite_top))
+            local img = love.graphics.newImage(def.sprite_top)
+            img:setFilter("nearest", "nearest")
+            TileRegistry.SPRITE_TOP[id] = img
+        end
+        if def.sprite_south then
+            assert(love.filesystem.getInfo(def.sprite_south),
+                string.format("tiles.lua '%s': sprite_south file not found: '%s'", def.name, def.sprite_south))
+            local img = love.graphics.newImage(def.sprite_south)
+            img:setFilter("nearest", "nearest")
+            TileRegistry.SPRITE_SOUTH[id] = img
+        end
+        if def.sprite_side then
+            -- Derive se_/sw_ paths from the sprite_side path.
+            -- e.g. "assests/tiles/s_dirt.png" → "assests/tiles/se_dirt.png" + "assests/tiles/sw_dirt.png"
+            local dir, stem = def.sprite_side:match("^(.+/)s_(.+%.png)$")
+            if dir and stem then
+                local se_path = dir .. "se_" .. stem
+                local sw_path = dir .. "sw_" .. stem
+                if love.filesystem.getInfo(se_path) then
+                    local img = love.graphics.newImage(se_path)
+                    img:setFilter("nearest", "nearest")
+                    TileRegistry.SPRITE_SE[id] = img
+                end
+                if love.filesystem.getInfo(sw_path) then
+                    local img = love.graphics.newImage(sw_path)
+                    img:setFilter("nearest", "nearest")
+                    TileRegistry.SPRITE_SW[id] = img
+                end
+            end
+        end
 
         -- Reverse category lookup.
         local cat = def.category

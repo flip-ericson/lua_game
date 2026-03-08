@@ -74,6 +74,30 @@ function Effects.hit(q, r, layer, tile_id)
     end
 end
 
+-- ── Public: register a watering splash (no shake, blue particles) ─────────
+function Effects.splash(q, r, layer)
+    local px, py = Hex.hex_to_pixel(q, r)
+    local cx = px
+    local cy = py - layer * LAYER_HEIGHT
+
+    for _ = 1, 10 do
+        local angle = math.random() * math.pi * 2
+        local speed = math.random(20, PART_SPEED)
+        particles[#particles + 1] = {
+            x        = cx + (math.random() - 0.5) * 24,
+            y        = cy + (math.random() - 0.5) * 10,
+            vx       = math.cos(angle) * speed,
+            vy       = math.sin(angle) * speed - 60,   -- bias upward
+            life     = PART_LIFE,
+            max_life = PART_LIFE,
+            cr       = 0.20,
+            cg       = 0.55,
+            cb       = 0.95,
+            size     = math.random(2, 4),
+        }
+    end
+end
+
 -- ── Public: update (call from GameLoop.update) ────────────────────────────
 function Effects.update(dt)
     -- Advance shake timers; prune expired.

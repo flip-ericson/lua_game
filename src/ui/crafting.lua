@@ -85,11 +85,49 @@ local function count_in_inv(player, item_id)
     return total
 end
 
+-- Returns total inventory count for an input slot, respecting accept groups.
+-- input.accept = { "oak_log", "palm_log", ... } means any of these count.
+local function count_for_input(player, input)
+    if input.accept then
+        local total = 0
+        for _, iname in ipairs(input.accept) do
+            local id = ItemRegistry.id(iname)
+            if id then total = total + count_in_inv(player, id) end
+        end
+        return total
+    end
+    local id = ItemRegistry.id(input.name)
+    return id and count_in_inv(player, id) or 0
+end
+
+-- Returns the slot (live reference) with the highest current durability for
+-- tools of the given class across the full inventory, or nil if none found.
+local function best_tool_slot(player, class)
+    local best_slot = nil
+    local best_dur  = -1
+    for _, slot in ipairs(player.inventory) do
+        if slot.item_id ~= 0 and slot.durability
+           and ItemRegistry.TOOL_CLASS[slot.item_id] == class
+           and slot.durability > best_dur then
+            best_slot = slot
+            best_dur  = slot.durability
+        end
+    end
+    return best_slot
+end
+
 local function can_craft(player, recipe)
     for _, input in ipairs(recipe.inputs) do
-        local id = ItemRegistry.id(input.name)
-        if not id or count_in_inv(player, id) < input.count then
+        if count_for_input(player, input) < input.count then
             return false
+        end
+    end
+    if recipe.tool_costs then
+        for _, cost in ipairs(recipe.tool_costs) do
+            local slot = best_tool_slot(player, cost.class)
+            if not slot or slot.durability < cost.durability_cost then
+                return false
+            end
         end
     end
     return true
@@ -110,18 +148,38 @@ local function visible_list(player)
 end
 
 local function do_craft(player, recipe)
-    -- Consume inputs.
+    -- Consume item inputs (respects accept groups: drains first available item type).
     for _, input in ipairs(recipe.inputs) do
-        local id   = ItemRegistry.id(input.name)
-        local need = input.count
-        for _, slot in ipairs(player.inventory) do
-            if slot.item_id == id and need > 0 then
-                local take = math.min(slot.count, need)
-                slot.count = slot.count - take
-                need       = need - take
-                if slot.count == 0 then slot.item_id = 0 end
+        local need  = input.count
+        local names = input.accept or { input.name }
+        for _, iname in ipairs(names) do
+            local id = ItemRegistry.id(iname)
+            if id then
+                for _, slot in ipairs(player.inventory) do
+                    if slot.item_id == id and need > 0 then
+                        local take = math.min(slot.count, need)
+                        slot.count = slot.count - take
+                        need       = need - take
+                        if slot.count == 0 then slot.item_id = 0 end
+                    end
+                    if need == 0 then break end
+                end
             end
             if need == 0 then break end
+        end
+    end
+    -- Deduct tool durability costs (best tool of each required class).
+    if recipe.tool_costs then
+        for _, cost in ipairs(recipe.tool_costs) do
+            local slot = best_tool_slot(player, cost.class)
+            if slot then
+                slot.durability = slot.durability - cost.durability_cost
+                if slot.durability <= 0 then
+                    slot.item_id    = 0
+                    slot.count      = 0
+                    slot.durability = nil
+                end
+            end
         end
     end
     -- Place output: stack into existing slots first, then empty slots.
@@ -271,10 +329,11 @@ function Crafting.draw(player)
             local col  = { 0.60, 0.60, 0.60 }
             if def then
                 local CAT_COLOR = {
-                    material = { 0.72, 0.60, 0.38 },
-                    organic  = { 0.30, 0.72, 0.26 },
-                    block    = { 0.52, 0.52, 0.58 },
-                    tool     = { 0.48, 0.68, 0.88 },
+                    material  = { 0.72, 0.60, 0.38 },
+                    organic   = { 0.30, 0.72, 0.26 },
+                    block     = { 0.52, 0.52, 0.58 },
+                    tool      = { 0.48, 0.68, 0.88 },
+                    component = { 0.62, 0.52, 0.78 },
                 }
                 col = CAT_COLOR[def.category] or col
             end
@@ -286,14 +345,45 @@ function Crafting.draw(player)
 
         -- Ingredient lines to the right of the icon.
         for _, input in ipairs(sel_recipe.inputs) do
-            local id    = ItemRegistry.id(input.name)
-            local have  = id and count_in_inv(player, id) or 0
-            local col   = (have >= input.count) and C_HAVE or C_LACK
-            local def   = id and ItemRegistry.get(id)
-            local iname = def and def.display_name or input.name
+            local have = count_for_input(player, input)
+            local col  = (have >= input.count) and C_HAVE or C_LACK
+            local iname
+            if input.accept and have >= input.count then
+                -- Satisfied: show the specific item that will be consumed.
+                for _, aname in ipairs(input.accept) do
+                    local aid = ItemRegistry.id(aname)
+                    if aid and count_in_inv(player, aid) > 0 then
+                        local def = ItemRegistry.get(aid)
+                        iname = def and def.display_name or aname
+                        break
+                    end
+                end
+            end
+            if not iname then
+                -- Not satisfied (or no group): show the group label so player
+                -- knows any variant counts, not just the base item.
+                iname = input.display_name
+                if not iname then
+                    local id  = ItemRegistry.id(input.name)
+                    local def = id and ItemRegistry.get(id)
+                    iname = def and def.display_name or input.name
+                end
+            end
             love.graphics.setColor(col[1], col[2], col[3])
             love.graphics.print(input.count .. "x  " .. iname, text_x, iy)
             iy = iy + font:getHeight() + 3
+        end
+        -- Tool cost lines (durability consumed during crafting).
+        if sel_recipe.tool_costs then
+            for _, cost in ipairs(sel_recipe.tool_costs) do
+                local slot     = best_tool_slot(player, cost.class)
+                local have_dur = slot and slot.durability or 0
+                local col      = (have_dur >= cost.durability_cost) and C_HAVE or C_LACK
+                local class_lbl = cost.class:sub(1,1):upper() .. cost.class:sub(2)
+                love.graphics.setColor(col[1], col[2], col[3])
+                love.graphics.print(cost.durability_cost .. " HP  " .. class_lbl, text_x, iy)
+                iy = iy + font:getHeight() + 3
+            end
         end
     else
         local hint = "Select a recipe"

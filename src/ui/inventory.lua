@@ -35,10 +35,11 @@ local PANEL_H = GRID_H + PAD * 2 + TITLE_H
 -- ── Category placeholder colours (mirrors hotbar.lua) ─────────────────────
 
 local CAT_COLOR = {
-    material = { 0.72, 0.60, 0.38 },
-    organic  = { 0.30, 0.72, 0.26 },
-    block    = { 0.52, 0.52, 0.58 },
-    tool     = { 0.48, 0.68, 0.88 },
+    material   = { 0.72, 0.60, 0.38 },
+    organic    = { 0.30, 0.72, 0.26 },
+    block      = { 0.52, 0.52, 0.58 },
+    tool       = { 0.48, 0.68, 0.88 },
+    component  = { 0.62, 0.52, 0.78 },
 }
 local CAT_COLOR_FALLBACK = { 0.60, 0.60, 0.60 }
 
@@ -65,6 +66,22 @@ local function bp_insert_pos(x, y, gx, gy)
     end
     insert_col = math.min(insert_col, COLS)
     return insert_col, row
+end
+
+local function draw_durability_bar(slot, sx, sy)
+    if not slot.durability then return end
+    local max_dur = ItemRegistry.DURABILITY[slot.item_id]
+    if not max_dur or max_dur == math.huge then return end
+    local pct = math.max(0, slot.durability / max_dur)
+    local r, g, b
+    if     pct >= 0.75 then r, g, b = 0.20, 0.85, 0.20
+    elseif pct >= 0.50 then r, g, b = 0.95, 0.88, 0.10
+    elseif pct >= 0.25 then r, g, b = 0.95, 0.50, 0.10
+    else                    r, g, b = 0.90, 0.15, 0.15
+    end
+    local bar_w = math.max(1, math.floor((SLOT_SIZE - 2) * pct))
+    love.graphics.setColor(r, g, b)
+    love.graphics.rectangle("fill", sx + 1, sy + SLOT_SIZE - 5, bar_w, 2)
 end
 
 local function draw_item(id, sx, sy)
@@ -137,7 +154,8 @@ function Inventory.draw(player)
     local gy   = py + PAD + TITLE_H
 
     -- ── Hover detection (pre-pass) ────────────────────────────────────────
-    local hovered_def   = nil
+    local hovered_def  = nil
+    local hovered_slot = nil
     for row = 0, ROWS - 1 do
         for col = 0, COLS - 1 do
             local sx = gx + col * (SLOT_SIZE + SLOT_GAP)
@@ -145,14 +163,16 @@ function Inventory.draw(player)
             if mx >= sx and mx < sx + SLOT_SIZE and my >= sy and my < sy + SLOT_SIZE then
                 local slot = player.inventory[BACKPACK_START + row * COLS + col]
                 if slot and slot.item_id ~= 0 then
-                    hovered_def = ItemRegistry.get(slot.item_id)
+                    hovered_def  = ItemRegistry.get(slot.item_id)
+                    hovered_slot = slot
                 end
             end
         end
     end
     -- While dragging, always show the dragged item's name.
     if drag_item and not hovered_def then
-        hovered_def = ItemRegistry.get(drag_item.item_id)
+        hovered_def  = ItemRegistry.get(drag_item.item_id)
+        hovered_slot = drag_item
     end
 
     -- Dim world behind the panel.
@@ -168,11 +188,18 @@ function Inventory.draw(player)
     love.graphics.setLineWidth(1)
     love.graphics.rectangle("line", px, py, PANEL_W, PANEL_H, 6, 6)
 
-    -- Title area: hovered item name, or empty.
+    -- Title area: hovered item name (with cur/max durability for tools), or empty.
     if hovered_def then
-        local tw = font:getWidth(hovered_def.display_name)
+        local label = hovered_def.display_name
+        if hovered_slot and hovered_slot.durability then
+            local max_dur = ItemRegistry.DURABILITY[hovered_slot.item_id]
+            if max_dur and max_dur ~= math.huge then
+                label = label .. " - " .. hovered_slot.durability .. "/" .. max_dur
+            end
+        end
+        local tw = font:getWidth(label)
         love.graphics.setColor(0.95, 0.90, 0.68)
-        love.graphics.print(hovered_def.display_name,
+        love.graphics.print(label,
             math.floor(px + (PANEL_W - tw) * 0.5),
             py + math.floor((TITLE_H - font:getHeight()) * 0.5) + 2)
     end
@@ -215,6 +242,8 @@ function Inventory.draw(player)
                         sx + SLOT_SIZE - ctw - 3,
                         sy + SLOT_SIZE - 14)
                 end
+
+                draw_durability_bar(slot, sx, sy)
             end
         end
     end
@@ -336,7 +365,7 @@ function Inventory.mousepressed(x, y, button, player)
         if bp_idx then
             local slot = player.inventory[bp_idx]
             if slot and slot.item_id ~= 0 then
-                drag_item = { item_id = slot.item_id, count = slot.count }
+                drag_item = { item_id = slot.item_id, count = slot.count, durability = slot.durability }
                 drag_src  = bp_idx
                 -- Collapse: shift everything after the lifted slot one step left.
                 local BACKPACK_END = BACKPACK_START + ROWS * COLS - 1
@@ -354,7 +383,7 @@ function Inventory.mousepressed(x, y, button, player)
     if hi then
         local slot = player.inventory[hi]
         if slot and slot.item_id ~= 0 then
-            drag_item = { item_id = slot.item_id, count = slot.count }
+            drag_item = { item_id = slot.item_id, count = slot.count, durability = slot.durability }
             drag_src  = hi
             player.inventory[hi] = { item_id = 0, count = 0 }
         end

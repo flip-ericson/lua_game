@@ -223,7 +223,7 @@ return {
             -- ── Shrubs ───────────────────────────────────────────────────
             { id = "bush",     type = "cover",
               temp_min = 0.20, temp_max = 0.80, humid_min = 0.35, humid_max = 0.85,
-              rarity = 0.050 },
+              rarity = 0.045 },
 
             -- ── Ground cover ─────────────────────────────────────────────
             { id = "tulip",    type = "cover",
@@ -238,6 +238,11 @@ return {
             { id = "daisy",    type = "cover",
               temp_min = 0.08, temp_max = 0.48, humid_min = 0.15, humid_max = 0.62,
               rarity = 0.080 },
+
+            -- Tall grass: grows in all biomes; listed last so trees/flowers take priority.
+            { id = "tall_grass", type = "cover",
+              temp_min = 0.00, temp_max = 1.00, humid_min = 0.00, humid_max = 1.00,
+              rarity = 0.075 },
         },
     },
 }

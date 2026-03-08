@@ -81,6 +81,10 @@ local function try_add_item(player, item_id, count)
         if s and s.item_id == 0 then
             s.item_id = item_id
             s.count   = remaining
+            local max_dur = ItemRegistry.DURABILITY[item_id]
+            if max_dur and max_dur ~= math.huge then
+                s.durability = max_dur
+            end
             return 0
         end
     end
@@ -91,6 +95,10 @@ local function try_add_item(player, item_id, count)
         if s and s.item_id == 0 then
             s.item_id = item_id
             s.count   = remaining
+            local max_dur = ItemRegistry.DURABILITY[item_id]
+            if max_dur and max_dur ~= math.huge then
+                s.durability = max_dur
+            end
             return 0
         end
     end
@@ -115,10 +123,11 @@ local _hex_nbrs = {
 
 -- ── Category placeholder colours ──────────────────────────────────────────
 local CAT_COLOR = {
-    material = { 0.72, 0.60, 0.38 },
-    organic  = { 0.30, 0.72, 0.26 },
-    block    = { 0.52, 0.52, 0.58 },
-    tool     = { 0.48, 0.68, 0.88 },
+    material   = { 0.72, 0.60, 0.38 },
+    organic    = { 0.30, 0.72, 0.26 },
+    block      = { 0.52, 0.52, 0.58 },
+    tool       = { 0.48, 0.68, 0.88 },
+    component  = { 0.62, 0.52, 0.78 },
 }
 local CAT_COLOR_FALLBACK = { 0.60, 0.60, 0.60 }
 

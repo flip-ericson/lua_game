@@ -142,9 +142,20 @@ end
 
 -- ── Cache key ─────────────────────────────────────────────────────────────
 
--- Static helper: returns the string key used by the World cache.
+-- Returns a unique integer key for (col_q, col_r, col_layer).
+-- Integer keys avoid string allocation on every get_tile call (hot path).
+-- Sized for world_radius=5000, chunk_size=32, chunk_depth=8:
+--   col_q, col_r ∈ [-157, 157] → offset by 200 → [43, 357]
+--   col_layer    ∈ [0, 127]
+-- Strides:  cl×1  cr×128  cq×(400×128=51200)  → guaranteed no collision.
+local _KEY_OFFSET    = 200
+local _KEY_CR_STRIDE = 128
+local _KEY_CQ_STRIDE = 400 * 128   -- 51200
+
 function ChunkColumn.key(col_q, col_r, col_layer)
-    return col_q .. "," .. col_r .. "," .. col_layer
+    return (col_q + _KEY_OFFSET) * _KEY_CQ_STRIDE
+         + (col_r + _KEY_OFFSET) * _KEY_CR_STRIDE
+         + col_layer
 end
 
 return ChunkColumn

@@ -9,6 +9,7 @@
 --   ItemRegistry.BASE_DAMAGE[id]    → number  damage per swing (0 for non-tools)
 --   ItemRegistry.SWING_COOLDOWN[id] → number  seconds between swings (0 non-tools)
 --   ItemRegistry.DURABILITY[id]     → number  uses before break (math.huge = never)
+--   ItemRegistry.MAX_WATER[id]      → number  water capacity (0 for non-watering tools)
 --   ItemRegistry.MAX_STACK[id]      → number  max items per inventory slot
 --   ItemRegistry.CATEGORY[id]       → string  "material"|"organic"|"block"|"tool"
 --   ItemRegistry.WEIGHT[id]         → number  kg per unit (groundwork for encumbrance)
@@ -32,6 +33,8 @@ ItemRegistry.CATEGORY       = {}
 ItemRegistry.WEIGHT         = {}
 ItemRegistry.SPRITE         = {}   -- loaded Image object, nil if no sprite defined
 ItemRegistry.PLACES_TILE    = {}   -- [item_id] = tile_id to place, or 0 if not placeable
+ItemRegistry.TOOL_CLASS     = {}   -- [item_id] = "pickaxe"|"shovel"|"axe"|"chisel"|nil
+ItemRegistry.MAX_WATER      = {}   -- [item_id] = water capacity (0 for non-watering tools)
 
 ItemRegistry.by_category = {}  -- by_category["tool"] = { 26, 27, 28, 29 }
 
@@ -74,6 +77,8 @@ function ItemRegistry.load()
         ItemRegistry.CATEGORY[id]       = def.category       or "material"
         ItemRegistry.WEIGHT[id]         = def.weight         or 0
         ItemRegistry.PLACES_TILE[id]    = (def.places_tile and TileRegistry.id(def.places_tile)) or 0
+        ItemRegistry.TOOL_CLASS[id]     = def.tool_class or nil
+        ItemRegistry.MAX_WATER[id]      = def.water or 0
 
         -- Sprite image — loaded once at startup, nil if no path provided.
         -- Uses love.filesystem.getInfo to verify the file exists before loading,
