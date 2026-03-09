@@ -167,7 +167,7 @@ local function draw_outline(world, hq, hr, hl, in_reach)
 end
 
 -- ── Unified tile renderer ─────────────────────────────────────────────────
-local function draw_tiles(world, cam, cam_layer, player)
+local function draw_tiles(world, cam, cam_layer, player, mob_manager)
     local W, H   = love.graphics.getDimensions()
     local zoom   = cam.zoom
     local half_w = W / (2 * zoom)
@@ -451,9 +451,12 @@ local function draw_tiles(world, cam, cam_layer, player)
             ::col_next::
         end
 
-        -- Player and item drops injected at their r row (painter depth-correct)
+        -- Player, mobs, and item drops injected at their r row (painter depth-correct)
         if player and player.r == r then
             player:draw_world(cam_layer)
+        end
+        if mob_manager then
+            mob_manager:draw_row(r)
         end
         for _, d in ipairs(ItemDrops.get_drops()) do
             if d.r == r then ItemDrops.draw_drop(d) end
@@ -472,8 +475,8 @@ local function draw_tiles(world, cam, cam_layer, player)
 end
 
 -- ── Public draw ────────────────────────────────────────────────────────────
-function Renderer.draw(world, cam, center_layer, player)
-    draw_tiles(world, cam, center_layer, player)
+function Renderer.draw(world, cam, center_layer, player, mob_manager)
+    draw_tiles(world, cam, center_layer, player, mob_manager)
 end
 
 return Renderer

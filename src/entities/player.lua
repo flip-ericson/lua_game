@@ -13,6 +13,7 @@
 local Hex          = require("src.core.hex")
 local RenderCfg    = require("config.render")
 local TileRegistry = require("src.world.tile_registry")
+local Physics      = require("src.core.physics")
 
 local LAYER_HEIGHT = RenderCfg.layer_height
 
@@ -40,17 +41,6 @@ local _h_target      = 2.25 * _hex_inradius           -- px: 1.25 hex-widths (2.
 local JUMP_SPEED_MUL = _h_target / (SPEED * _jump_airtime)
 
 local MAX_DT      = 1/15  -- never simulate > 4 frames at once
-
--- ── Floor-detection circle ─────────────────────────────────────────────────
--- 5 sample points in world-pixel space (horizontal plane).
--- Grounded if ANY point has a solid tile at the floor layer.
-local FOOT_R = 11   -- px; radius = half of 23 px diameter (= half sprite width)
-
-local _foot = {
-    {  0,      0 },
-    {  FOOT_R, 0 }, { -FOOT_R, 0 },
-    {  0,  FOOT_R }, {  0, -FOOT_R },
-}
 
 -- ── Spritesheet layout ────────────────────────────────────────────────────
 -- Sheet: 1024×888 px, 10 columns × 8 rows.
@@ -135,102 +125,10 @@ function Player.new(x, y, layer)
     return p
 end
 
--- ── Internal helpers ───────────────────────────────────────────────────────
-local SOLID = TileRegistry.SOLID  -- flat array; by-ref, safe to cache
-
-local function foot_grounded(world, x, y, floor_layer)
-    for _, off in ipairs(_foot) do
-        local fq, fr = Hex.pixel_to_hex(x + off[1], y + off[2])
-        if SOLID[world:get_tile(fq, fr, floor_layer)] then
-            return true
-        end
-    end
-    return false
-end
-
--- ── SAT hex-vs-hex wall collision ─────────────────────────────────────────
--- Both the player and every wall tile are flat-top regular hexagons with the
--- same orientation → they share exactly 6 face normals → SAT needs only 6
--- axis tests per wall hex.
---
--- On each axis i:  sep_i = dot(player_center - wall_center, normal_i)
--- Overlap on axis i:  SAT_SUM - sep_i   (SAT_SUM = sum of both inradii)
--- If any sep_i > SAT_SUM → shapes don't overlap, skip this hex.
--- Otherwise the axis with the smallest sep (= smallest overlap) is the MTV.
--- Push along that normal by (SAT_SUM - min_sep).
-local _S = math.sqrt(3) * 0.5
-
--- 6 outward face normals for flat-top hexes (same for every hex in the grid).
-local _hex_normals = {
-    { _S,  0.5 },   -- lower-right face
-    { 0,   1.0 },   -- bottom face
-    {-_S,  0.5 },   -- lower-left face
-    {-_S, -0.5 },   -- upper-left face
-    { 0,  -1.0 },   -- top face
-    { _S, -0.5 },   -- upper-right face
-}
-
--- 6 axial neighbor offsets (same order as normals — coincidence, but handy).
-local _hex_nbrs = {
-    { 1,  0}, { 1, -1}, { 0, -1},
-    {-1,  0}, {-1,  1}, { 0,  1},
-}
-
-local PLAYER_HEX_R    = 24                          -- circumradius (px); tune here
+-- ── Collision constants ────────────────────────────────────────────────────
+-- Helpers live in src/core/physics.lua (shared with mobs).
+local PLAYER_HEX_R    = 24                              -- circumradius (px); tune here
 local PLAYER_INRADIUS = PLAYER_HEX_R * math.sqrt(3) * 0.5
-local TILE_INRADIUS   = RenderCfg.hex_size * math.sqrt(3) * 0.5
-local SAT_SUM         = PLAYER_INRADIUS + TILE_INRADIUS  -- ≈ 62.4 px
-
-local function wall_resolve(world, x, y, wall_layer)
-    local push_x, push_y = 0, 0
-
-    -- Player's current hex + its 6 neighbors = the only hexes close enough to collide.
-    local pq, pr = Hex.pixel_to_hex(x, y)
-
-    local candidates = { {pq, pr} }
-    for _, nb in ipairs(_hex_nbrs) do
-        candidates[#candidates + 1] = { pq + nb[1], pr + nb[2] }
-    end
-
-    for _, hc in ipairs(candidates) do
-        local fq, fr = hc[1], hc[2]
-        if SOLID[world:get_tile(fq, fr, wall_layer)] then
-            local hx, hy = Hex.hex_to_pixel(fq, fr)
-            local rx = x - hx   -- player center relative to wall hex center
-            local ry = y - hy
-
-            -- 6-axis SAT: find the axis with maximum |sep| (= minimum penetration).
-            -- Separating axis exists if |sep| > SAT_SUM on any axis.
-            -- MTV = axis with largest |sep|; overlap = SAT_SUM - max_abs_sep.
-            local max_abs_sep = -math.huge
-            local best_nx, best_ny = 1, 0
-            local best_sign = 1
-            local colliding = true
-
-            for _, n in ipairs(_hex_normals) do
-                local sep     = rx * n[1] + ry * n[2]
-                local abs_sep = math.abs(sep)
-                if abs_sep > SAT_SUM then
-                    colliding = false   -- separating axis found — no overlap
-                    break
-                end
-                if abs_sep > max_abs_sep then
-                    max_abs_sep = abs_sep
-                    best_nx, best_ny = n[1], n[2]
-                    best_sign = (sep >= 0) and 1 or -1
-                end
-            end
-
-            if colliding then
-                local overlap = SAT_SUM - max_abs_sep
-                push_x = push_x + best_sign * best_nx * overlap
-                push_y = push_y + best_sign * best_ny * overlap
-            end
-        end
-    end
-
-    return x + push_x, y + push_y
-end
 
 -- ── Animation update ───────────────────────────────────────────────────────
 -- Called each frame with the movement intent (dx/dy from raw input, NOT velocity).
@@ -337,7 +235,7 @@ function Player:update(dt, world)
 
         if math.floor(self.z) < math.floor(z_prev) then
             local fl_crossed = math.floor(z_prev)   -- the integer we just passed through
-            if foot_grounded(world, self.x, self.y, fl_crossed) then
+            if Physics.foot_grounded(world, self.x, self.y, fl_crossed) then
                 self.z        = fl_crossed + 0.0
                 self.falling  = false
                 self.grounded = true
@@ -347,7 +245,7 @@ function Player:update(dt, world)
     else
         -- GROUNDED: z is always an exact integer here.
         -- Check floor every frame; if it disappears (walked off ledge), start falling.
-        if foot_grounded(world, self.x, self.y, math.floor(self.z)) then
+        if Physics.foot_grounded(world, self.x, self.y, math.floor(self.z)) then
             self.grounded = true
             self.floor_z  = math.floor(self.z)  -- keep shadow pinned to current ground
         else
@@ -360,7 +258,7 @@ function Player:update(dt, world)
     local wall_layer = math.floor(self.z) + 1
     local nx = self.x + self.vx * dt
     local ny = self.y + self.vy * dt
-    self.x, self.y = wall_resolve(world, nx, ny, wall_layer)
+    self.x, self.y = Physics.wall_resolve(world, nx, ny, wall_layer, PLAYER_INRADIUS)
 
     -- ── 5. Derive hex coords and integer layer ────────────────────────────
     self.q, self.r = Hex.pixel_to_hex(self.x, self.y)

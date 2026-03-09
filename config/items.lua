@@ -363,5 +363,20 @@ return {
         sprite = "assests/items/item_crop_rye.png",
     },
 
+    -- ── Weapons ───────────────────────────────────────────────────────────
+
+    {
+        id = 47, name = "stone_sword", display_name = "Stone Sword",
+        max_stack = 1, category = "weapon", weight = 0.9,
+        sprite = "assests/items/item_weapon_sword_stone.png",
+        is_tool        = true,
+        base_damage    = 7,
+        swing_cooldown = 0.7,
+        durability     = 50,
+        preferred      = {},      -- no tile category bonus; combat damage tuned later
+        penalty_mul    = 0.3,     -- weak against tiles (it's not a mining tool)
+        tool_class     = "sword",
+    },
+
     -- ── Add new items below this line. Never renumber above. ─────────────
 }

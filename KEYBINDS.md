@@ -52,6 +52,7 @@
 |-----|--------|
 | `J` | Toggle jade HUD (tile name + HP under cursor, top-center) |
 | `X` | Toggle instamine — LMB instantly breaks hovered tile and spawns its drops |
+| `P` | Toggle mob path overlay — draws A* paths as red lines (world space, debug only) |
 | `F3` | Toggle all debug overlays (master switch) |
 | `H` | Toggle HUD (FPS, layer, depth, hover coords, render mode) |
 
@@ -60,7 +61,7 @@
 ## HUD Reference
 The HUD bar at the top of the screen shows:
 ```
-FPS:60  |  overworld  |  layer 768 (sea)  |  (12,-4)  |  occl:on  |  Tab  PgUp/Dn  Home  O  X  H  F3
+FPS:60  |  overworld  |  layer 768 (sea)  |  (12,-4)  |  occl:on  |  Tab  PgUp/Dn  Home  O  X  H  P  F3
 ```
 - **mode** — `overworld` or `underground`
 - **layer N (tag)** — current camera layer; tag is depth below sea (`↓`), above sea (`↑`), or `sea`

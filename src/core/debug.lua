@@ -14,10 +14,11 @@ local LAYER_HEIGHT = RenderCfg.layer_height
 
 local Debug = {}
 
-local show_all  = true
-local show_hud  = true
-local show_jade = true
-local instamine = false
+local show_all       = true
+local show_hud       = true
+local show_jade      = true
+local instamine      = false
+local show_mob_paths = false
 
 -- ── Toggles ───────────────────────────────────────────────────────────────
 
@@ -41,6 +42,14 @@ function Debug.instamine_on()
     return instamine
 end
 
+function Debug.toggle_mob_paths()
+    show_mob_paths = not show_mob_paths
+end
+
+function Debug.mob_paths_active()
+    return show_mob_paths
+end
+
 -- ── FPS / HUD ─────────────────────────────────────────────────────────────
 
 local function draw_hud(cam, cam_layer, sea_level)
@@ -61,7 +70,7 @@ local function draw_hud(cam, cam_layer, sea_level)
 
     love.graphics.setColor(0.35, 0.35, 0.45)
     love.graphics.print(
-        string.format("FPS:%d  |  %s  |  layer %d (%s)  |  (%d,%d)  |  Tab  PgUp/Dn  Home  O  X  H  F3",
+        string.format("FPS:%d  |  %s  |  layer %d (%s)  |  (%d,%d)  |  Tab  PgUp/Dn  Home  O  X  H  P  F3",
             love.timer.getFPS(), mode_tag, cam_layer, depth_tag, hq, hr),
         10, 10
     )
@@ -128,9 +137,10 @@ end
 local function draw_active_flags()
     -- Each entry: { hotkey, label }. Only shown when the flag is active.
     local active = {}
-    if instamine                    then active[#active+1] = { "X", "instamine" } end
-    if not Renderer.get_occlusion() then active[#active+1] = { "O", "occl:off"  } end
-    if show_hud                     then active[#active+1] = { "H", "hud"       } end
+    if instamine                    then active[#active+1] = { "X", "instamine"  } end
+    if not Renderer.get_occlusion() then active[#active+1] = { "O", "occl:off"   } end
+    if show_hud                     then active[#active+1] = { "H", "hud"        } end
+    if show_mob_paths               then active[#active+1] = { "P", "mob:paths"  } end
 
     if #active == 0 then return end
 
@@ -151,13 +161,20 @@ end
 
 -- ── Public draw (call last in GameLoop.draw) ──────────────────────────────
 
-function Debug.draw(world, cam, cam_layer, sea_level)
+function Debug.draw(world, cam, cam_layer, sea_level, mob_manager)
     if show_all then
         if show_hud then draw_hud(cam, cam_layer, sea_level) end
     end
 
     -- Jade HUD is independent: toggled separately with J, not masked by F3.
     if show_jade then draw_jade(world) end
+
+    -- Mob path overlay: drawn in world space (requires camera transform).
+    if show_mob_paths and mob_manager then
+        cam:apply()
+        mob_manager:draw_paths()
+        cam:reset()
+    end
 
     draw_active_flags()
 

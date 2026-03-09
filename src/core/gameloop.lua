@@ -20,6 +20,8 @@ local Inventory     = require("src.ui.inventory")
 local Crafting      = require("src.ui.crafting")
 local Recipes       = require("config.recipes")
 local Time          = require("src.core.time")
+local MobManager    = require("src.world.mob_manager")
+local MobDefs       = require("config.mobs")
 
 local GameLoop = {}
 
@@ -36,6 +38,7 @@ local CAM_LERP = 8  -- camera follow speed (higher = snappier; 8 = smooth but re
 local swing_cooldown  = 0   -- seconds remaining until next swing is allowed
 local FISTS_ID              -- set in GameLoop.load() after ItemRegistry is ready
 local id_rye_planted        -- set in GameLoop.load(); needed in mousepressed
+local mob_manager           -- MobManager instance; created in GameLoop.load()
 
 -- Search for a valid spawn point: a grass tile with air directly above.
 -- Picks random hexes within the world boundary and retries up to max_attempts.
@@ -199,6 +202,7 @@ function GameLoop.load()
     player.inventory[6] = tool_slot("watering_can")
     player.inventory[7] = { item_id = ItemRegistry.id("rye_seed"),  count = 10 }
     player.inventory[8] = { item_id = ItemRegistry.id("rye_grain"), count = 10 }
+    player.inventory[9] = tool_slot("stone_sword")
 
     -- Unlock default recipes.
     for _, recipe in ipairs(Recipes) do
@@ -212,6 +216,11 @@ function GameLoop.load()
         world:preload_near(cam_q, cam_r, cam_layer)
     end
 
+    -- Spawn test turkey on a valid grass tile with air above (same rules as player).
+    mob_manager = MobManager.new()
+    local tq, tr, tl = find_spawn(world)
+    mob_manager:spawn(MobDefs.turkey, tq, tr, tl)
+
     print(string.format("[Startup] worldgen + spawn + preload: %.2f s", love.timer.getTime() - t0))
 end
 
@@ -220,6 +229,9 @@ function GameLoop.update(dt)
 
     -- ── Player movement (WASD) + physics (gravity / floor) ───────────────
     player:update(dt, world)
+
+    -- ── Mob AI ────────────────────────────────────────────────────────────
+    mob_manager:update(dt, world, player)
 
     -- ── Item drop physics ─────────────────────────────────────────────────
     ItemDrops.update(dt, world, player)
@@ -252,14 +264,14 @@ end
 function GameLoop.draw()
     love.graphics.clear(0.06, 0.06, 0.10)
 
-    Renderer.draw(world, camera, cam_layer, player)
+    Renderer.draw(world, camera, cam_layer, player, mob_manager)
 
     Hotbar.draw(player)
     Inventory.draw(player)
     Crafting.draw(player)
     Time.draw(Time.get(world), W, H)
 
-    Debug.draw(world, camera, cam_layer, WorldgenCfg.sea_level)
+    Debug.draw(world, camera, cam_layer, WorldgenCfg.sea_level, mob_manager)
 end
 
 -- ── Debug: instamine tile break ───────────────────────────────────────────
@@ -294,10 +306,11 @@ function GameLoop.keypressed(key, scancode, isrepeat)
     if key == "o"   then Renderer.toggle_occlusion() end
 
     -- Debug overlays
-    if key == "f3" then Debug.toggle()           end
-    if key == "h"  then Debug.toggle_hud()       end
-    if key == "j"  then Debug.toggle_jade()      end
-    if key == "x"  then Debug.toggle_instamine() end
+    if key == "f3" then Debug.toggle()            end
+    if key == "h"  then Debug.toggle_hud()        end
+    if key == "j"  then Debug.toggle_jade()       end
+    if key == "x"  then Debug.toggle_instamine()  end
+    if key == "p"  then Debug.toggle_mob_paths()  end
 
     -- Backpack
     if key == "i" then
@@ -361,6 +374,13 @@ function GameLoop.mousepressed(x, y, button, istouch, presses)
     Crafting.mousepressed(x, y, button, player)
 
     if button == 1 and not player.backpack_open and not Hotbar.hit_test(x, y) then
+        -- Mob path debug mode: LMB sets destination for the first mob instead of mining.
+        if Debug.mob_paths_active() then
+            local hq, hr, hl = Renderer.get_hover()
+            if hq then mob_manager:debug_redirect(world, hq, hr, hl) end
+            return
+        end
+
         local hq, hr, hl, htid = Renderer.get_hover()
 
         if Debug.instamine_on() then
